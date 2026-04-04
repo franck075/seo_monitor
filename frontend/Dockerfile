@@ -18,6 +18,7 @@ FROM node:20-alpine AS runner
 
 WORKDIR /app
 ENV NODE_ENV=production
+ENV BACKEND_INTERNAL_URL=http://seomonitor.railway.internal:8000
 
 COPY --from=builder /app/public ./public
 COPY --from=builder /app/.next/standalone ./
