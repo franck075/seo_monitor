@@ -25,7 +25,6 @@ def upgrade():
         sa.Column('is_resolved', sa.Boolean(), server_default='false'),
         sa.Column('resolved_at', sa.DateTime(timezone=True)),
     )
-    op.create_index('ix_hack_detections_website_id', 'hack_detections', ['website_id'])
     op.create_index('ix_hack_detections_detected_at', 'hack_detections', ['detected_at'])
 
 
