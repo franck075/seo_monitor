@@ -1,5 +1,5 @@
 "use client";
-import { useState } from "react";
+import { useState, Suspense } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { useSearchParams } from "next/navigation";
 import { api } from "@/lib/api";
@@ -39,7 +39,7 @@ function getDaysLeft(iso: string) {
   return Math.max(0, Math.ceil((new Date(iso).getTime() - Date.now()) / 86400000));
 }
 
-export default function BillingPage() {
+function BillingPageContent() {
   const searchParams = useSearchParams();
   const isExpired = searchParams.get("expired") === "1";
   const [checkoutPlan, setCheckoutPlan] = useState<string | null>(null);
@@ -295,5 +295,13 @@ export default function BillingPage() {
         </div>
       )}
     </div>
+  );
+}
+
+export default function BillingPage() {
+  return (
+    <Suspense fallback={<div className="flex h-screen items-center justify-center"><Loader2 className="w-8 h-8 animate-spin text-gray-400" /></div>}>
+      <BillingPageContent />
+    </Suspense>
   );
 }
