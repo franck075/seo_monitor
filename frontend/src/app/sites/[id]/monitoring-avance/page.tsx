@@ -511,7 +511,7 @@ export default function SEOIssuesPage() {
     <div className="flex h-screen bg-gray-50">
       <Sidebar />
       <div className="flex-1 flex flex-col overflow-hidden">
-        <TopNav />
+        <TopNav title="Monitoring SEO Avancé" />
         <main className="flex-1 overflow-y-auto p-6 lg:p-8">
           {/* Header */}
           <div className="flex items-start justify-between mb-6">
