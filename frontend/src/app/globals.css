@@ -1,0 +1,51 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 0 0% 100%;
+    --foreground: 222.2 84% 4.9%;
+    --card: 0 0% 100%;
+    --card-foreground: 222.2 84% 4.9%;
+    --primary: 221.2 83.2% 53.3%;
+    --primary-foreground: 210 40% 98%;
+    --secondary: 210 40% 96.1%;
+    --secondary-foreground: 222.2 47.4% 11.2%;
+    --muted: 210 40% 96.1%;
+    --muted-foreground: 215.4 16.3% 46.9%;
+    --border: 214.3 31.8% 91.4%;
+    --destructive: 0 84.2% 60.2%;
+    --destructive-foreground: 210 40% 98%;
+    --radius: 0.5rem;
+  }
+}
+
+body {
+  background-color: hsl(var(--background));
+  color: hsl(var(--foreground));
+}
+
+/* Tiptap Editor Styles */
+.tiptap-editor .ProseMirror {
+  outline: none;
+  min-height: 400px;
+  padding: 1rem;
+}
+.tiptap-editor .ProseMirror h2 { font-size: 1.5rem; font-weight: 700; margin: 1.2rem 0 0.6rem; }
+.tiptap-editor .ProseMirror h3 { font-size: 1.25rem; font-weight: 600; margin: 1rem 0 0.5rem; }
+.tiptap-editor .ProseMirror h4 { font-size: 1.1rem; font-weight: 600; margin: 0.8rem 0 0.4rem; }
+.tiptap-editor .ProseMirror p { margin: 0.5rem 0; line-height: 1.7; }
+.tiptap-editor .ProseMirror ul { list-style: disc; padding-left: 1.5rem; margin: 0.5rem 0; }
+.tiptap-editor .ProseMirror ol { list-style: decimal; padding-left: 1.5rem; margin: 0.5rem 0; }
+.tiptap-editor .ProseMirror blockquote { border-left: 4px solid #3b82f6; padding-left: 1rem; margin: 1rem 0; color: #6b7280; font-style: italic; }
+.tiptap-editor .ProseMirror code { background: #f3f4f6; padding: 0.1rem 0.3rem; border-radius: 4px; font-family: monospace; font-size: 0.85em; }
+.tiptap-editor .ProseMirror pre { background: #1e293b; color: #e2e8f0; padding: 1rem; border-radius: 8px; overflow-x: auto; margin: 1rem 0; }
+.tiptap-editor .ProseMirror pre code { background: transparent; color: inherit; padding: 0; }
+.tiptap-editor .ProseMirror table { border-collapse: collapse; width: 100%; margin: 1rem 0; }
+.tiptap-editor .ProseMirror table td, .tiptap-editor .ProseMirror table th { border: 1px solid #e5e7eb; padding: 0.5rem 0.75rem; }
+.tiptap-editor .ProseMirror table th { background: #f9fafb; font-weight: 600; }
+.tiptap-editor .ProseMirror img { max-width: 100%; border-radius: 8px; margin: 0.5rem 0; }
+.tiptap-editor .ProseMirror a { color: #2563eb; text-decoration: underline; }
+.tiptap-editor .ProseMirror hr { border: none; border-top: 2px solid #e5e7eb; margin: 1.5rem 0; }
+.tiptap-editor .ProseMirror p.is-editor-empty:first-child::before { content: attr(data-placeholder); float: left; color: #9ca3af; pointer-events: none; height: 0; }
