@@ -108,7 +108,7 @@ export default function RichTextEditor({
     if (editor && content !== editor.getHTML()) {
       // Only update if editor is empty or content was reset externally
       if (!editor.isFocused) {
-        editor.commands.setContent(content, false)
+        editor.commands.setContent(content, { emitUpdate: false })
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
