@@ -854,9 +854,10 @@ function BlogTab() {
 // ── Settings Tab ──────────────────────────────────────────────────────────────
 function SettingsTab() {
   const qc = useQueryClient();
-  const [settingsTab, setSettingsTab] = useState<"robots" | "redirects" | "scripts" | "social">("robots");
+  const [settingsTab, setSettingsTab] = useState<"seo" | "robots" | "redirects" | "scripts" | "social">("seo");
   const [robots, setRobots] = useState("");
   const [redirects, setRedirects] = useState<{ from: string; to: string; type: "301" | "302" }[]>([]);
+  const [seo, setSeo] = useState({ meta_title: "", meta_description: "", structured_data: "" });
   const [social, setSocial] = useState({ linkedin: "", facebook: "", youtube: "", instagram: "", tiktok: "" });
   const [scripts, setScripts] = useState({
     head_priority: "", head: "", body: "", head_legacy: "", body_legacy: ""
@@ -875,6 +876,7 @@ function SettingsTab() {
     if (settings.redirects) { try { setRedirects(JSON.parse(settings.redirects)); } catch { } }
     if (settings.social) { try { setSocial(s => ({ ...s, ...JSON.parse(settings.social) })); } catch { } }
     if (settings.scripts) { try { setScripts(s => ({ ...s, ...JSON.parse(settings.scripts) })); } catch { } }
+    if (settings.seo) { try { setSeo(s => ({ ...s, ...JSON.parse(settings.seo) })); } catch { } }
   }, [settings]);
 
   async function saveSettings(payload: Record<string, string>) {
@@ -898,6 +900,7 @@ function SettingsTab() {
   }
 
   const SETTINGS_TABS = [
+    { key: "seo", label: "SEO" },
     { key: "robots", label: "Robots.txt" },
     { key: "redirects", label: "Redirections" },
     { key: "scripts", label: "Scripts" },
@@ -919,6 +922,37 @@ function SettingsTab() {
       </div>
 
       <div className="p-5">
+        {settingsTab === "seo" && (
+          <div className="space-y-4">
+            <p className="text-xs text-gray-500">Balises SEO de la page d&apos;accueil (title, meta description, JSON-LD)</p>
+            <div>
+              <label className="text-xs font-medium text-gray-600 block mb-1">Title</label>
+              <input value={seo.meta_title} onChange={e => setSeo(s => ({ ...s, meta_title: e.target.value }))}
+                placeholder="SEO Alert Scan — Monitoring SEO automatisé 24/7"
+                className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+              <p className="text-xs text-gray-400 mt-1">{seo.meta_title.length}/60 caractères</p>
+            </div>
+            <div>
+              <label className="text-xs font-medium text-gray-600 block mb-1">Meta Description</label>
+              <textarea value={seo.meta_description} onChange={e => setSeo(s => ({ ...s, meta_description: e.target.value }))}
+                rows={3} placeholder="Surveillez vos positions Google, Core Web Vitals et uptime en temps réel. Alertes email et Telegram. Essai gratuit 7 jours."
+                className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 resize-y" />
+              <p className="text-xs text-gray-400 mt-1">{seo.meta_description.length}/160 caractères</p>
+            </div>
+            <div>
+              <label className="text-xs font-medium text-gray-600 block mb-1">Données structurées JSON-LD</label>
+              <textarea value={seo.structured_data} onChange={e => setSeo(s => ({ ...s, structured_data: e.target.value }))}
+                rows={14} placeholder={`{\n  "@context": "https://schema.org",\n  "@type": "SoftwareApplication",\n  "name": "SEO Alert Scan",\n  "applicationCategory": "BusinessApplication",\n  "operatingSystem": "Web"\n}`}
+                className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-blue-500 resize-y" />
+              <p className="text-xs text-gray-400 mt-1">Format JSON-LD valide (schema.org)</p>
+            </div>
+            <button onClick={() => saveSettings({ seo: JSON.stringify(seo) })} disabled={saving}
+              className="flex items-center gap-2 px-4 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-60">
+              <Save className="w-4 h-4" />{saving ? "Sauvegarde…" : "Enregistrer"}
+            </button>
+          </div>
+        )}
+
         {settingsTab === "robots" && (
           <div className="space-y-3">
             <p className="text-xs text-gray-500">Contenu du fichier robots.txt servi dynamiquement</p>

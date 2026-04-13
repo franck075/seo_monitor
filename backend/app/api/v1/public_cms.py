@@ -1,9 +1,10 @@
+import json
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from datetime import datetime, timezone
 from app.db.session import get_db
-from app.models.cms import Announcement, BlogPost, ClientLogo
+from app.models.cms import Announcement, BlogPost, ClientLogo, SiteSetting
 
 public_router = APIRouter(tags=["public"])
 
@@ -70,6 +71,31 @@ async def get_published_post(slug: str, db: AsyncSession = Depends(get_db)):
         "structured_data": post.structured_data, "tags": post.tags, "author": post.author,
         "published_at": post.published_at,
     }
+
+
+# ── Public SEO Settings ──────────────────────────────────────────────────────
+
+@public_router.get("/seo-settings")
+async def public_seo_settings(db: AsyncSession = Depends(get_db)):
+    result = await db.execute(select(SiteSetting).where(SiteSetting.key == "seo"))
+    setting = result.scalar_one_or_none()
+    if not setting or not setting.value:
+        return {"meta_title": "", "meta_description": "", "structured_data": None}
+    try:
+        data = json.loads(setting.value)
+        structured = None
+        if data.get("structured_data"):
+            try:
+                structured = json.loads(data["structured_data"])
+            except (json.JSONDecodeError, TypeError):
+                pass
+        return {
+            "meta_title": data.get("meta_title", ""),
+            "meta_description": data.get("meta_description", ""),
+            "structured_data": structured,
+        }
+    except json.JSONDecodeError:
+        return {"meta_title": "", "meta_description": "", "structured_data": None}
 
 
 # ── Public Client Logos ───────────────────────────────────────────────────────
