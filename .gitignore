@@ -36,5 +36,8 @@ Thumbs.db
 # Docker volumes
 postgres_data/
 
+# SSL certificates (NEVER commit private keys)
+nginx/certs/
+
 # Claude
 .claude/
