@@ -23,6 +23,10 @@ echo "→ Attente du backend..."
 sleep 15
 docker compose -f docker-compose.prod.yml ps backend
 
+# 5. Redémarrer nginx pour qu'il rafraîchisse le DNS interne vers les containers recréés
+echo "→ Redémarrage nginx (rafraîchissement DNS)..."
+docker compose -f docker-compose.prod.yml restart nginx
+
 echo "✅ Déploiement terminé !"
 echo "→ Site     : https://seoalertscan.com"
 echo "→ API docs : https://seoalertscan.com/api/v1/docs"
