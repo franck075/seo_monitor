@@ -98,6 +98,21 @@ async def public_seo_settings(db: AsyncSession = Depends(get_db)):
         return {"meta_title": "", "meta_description": "", "structured_data": None}
 
 
+# ── Public Site Scripts ──────────────────────────────────────────────────────
+
+@public_router.get("/site-scripts")
+async def public_site_scripts(db: AsyncSession = Depends(get_db)):
+    result = await db.execute(select(SiteSetting).where(SiteSetting.key == "scripts"))
+    setting = result.scalar_one_or_none()
+    empty = {"head_priority": "", "head": "", "body": "", "head_legacy": "", "body_legacy": ""}
+    if not setting or not setting.value:
+        return empty
+    try:
+        return {**empty, **json.loads(setting.value)}
+    except json.JSONDecodeError:
+        return empty
+
+
 # ── Public Client Logos ───────────────────────────────────────────────────────
 
 @public_router.get("/client-logos/active")
