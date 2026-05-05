@@ -1,6 +1,8 @@
+import logging
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
+from sqlalchemy.exc import SQLAlchemyError
 from datetime import datetime, timezone, timedelta
 from app.db.session import get_db
 from app.models.user import User, UserAPICredential
@@ -9,27 +11,42 @@ from app.core.security import hash_password, verify_password, create_access_toke
 from app.core.crypto import encrypt_credentials
 from app.deps import get_current_user, get_current_user_no_trial_check, get_workspace_owner_id
 
+logger = logging.getLogger(__name__)
+
 router = APIRouter(prefix="/auth", tags=["auth"])
 
 VALID_PLANS = {"starter", "pro", "agency"}
 
 @router.post("/register", response_model=RegisterResponse)
 async def register(payload: UserCreate, db: AsyncSession = Depends(get_db)):
-    result = await db.execute(select(User).where(User.email == payload.email))
-    if result.scalar_one_or_none():
-        raise HTTPException(status_code=400, detail="Email already registered")
-    plan = payload.plan if payload.plan in VALID_PLANS else "starter"
-    trial_ends = datetime.now(timezone.utc) + timedelta(days=7)
-    user = User(
-        email=payload.email,
-        hashed_password=hash_password(payload.password),
-        full_name=payload.full_name,
-        plan=plan,
-        trial_ends_at=trial_ends,
-    )
-    db.add(user)
-    await db.commit()
-    await db.refresh(user)
+    try:
+        result = await db.execute(select(User).where(User.email == payload.email))
+        if result.scalar_one_or_none():
+            raise HTTPException(status_code=400, detail="Email already registered")
+        plan = payload.plan if payload.plan in VALID_PLANS else "starter"
+        trial_ends = datetime.now(timezone.utc) + timedelta(days=7)
+        user = User(
+            email=payload.email,
+            hashed_password=hash_password(payload.password),
+            full_name=payload.full_name,
+            role="user",
+            is_active=True,
+            plan=plan,
+            trial_ends_at=trial_ends,
+        )
+        db.add(user)
+        await db.commit()
+        await db.refresh(user)
+    except HTTPException:
+        raise
+    except SQLAlchemyError:
+        logger.exception("register: database error")
+        await db.rollback()
+        raise HTTPException(status_code=500, detail="Registration failed, please try again")
+    except Exception:
+        logger.exception("register: unexpected error")
+        raise HTTPException(status_code=500, detail="Registration failed, please try again")
+
     token = create_access_token({"sub": str(user.id)})
     return RegisterResponse(access_token=token, user=UserOut.model_validate(user))
 
