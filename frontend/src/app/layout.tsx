@@ -24,37 +24,111 @@ async function fetchSiteScripts(): Promise<SiteScripts> {
   }
 }
 
-// Extract <script> and <noscript> tags from raw HTML string
-function parseScriptTags(raw: string): Array<{ type: "script" | "noscript"; src?: string; content: string; attrs: string }> {
+function getAttr(attrs: string, name: string): string | undefined {
+  const m = attrs.match(new RegExp(`${name}=["']([^"']+)["']`, "i"));
+  return m?.[1];
+}
+
+type ParsedTag =
+  | { kind: "meta"; name?: string; content?: string; property?: string; httpEquiv?: string }
+  | { kind: "link"; rel?: string; href?: string; attrs: string }
+  | { kind: "script"; src?: string; content: string; async: boolean; defer: boolean }
+  | { kind: "noscript"; content: string };
+
+function parseHeadElements(raw: string): ParsedTag[] {
   if (!raw?.trim()) return [];
-  const results: Array<{ type: "script" | "noscript"; src?: string; content: string; attrs: string }> = [];
-  const regex = /<(script|noscript)([^>]*)>([\s\S]*?)<\/\1>/gi;
-  let match;
-  while ((match = regex.exec(raw)) !== null) {
-    const tagType = match[1].toLowerCase() as "script" | "noscript";
-    const attrs = match[2];
-    const content = match[3].trim();
-    const srcMatch = attrs.match(/src=["']([^"']+)["']/i);
-    results.push({ type: tagType, src: srcMatch?.[1], content, attrs });
+  const results: ParsedTag[] = [];
+
+  // Self-closing: <meta ...> and <link ...>
+  const selfClosing = /<(meta|link)([^>]*?)\/?>(?!\s*<\/)/gi;
+  let m: RegExpExecArray | null;
+  while ((m = selfClosing.exec(raw)) !== null) {
+    const tag = m[1].toLowerCase();
+    const attrs = m[2];
+    if (tag === "meta") {
+      results.push({
+        kind: "meta",
+        name: getAttr(attrs, "name"),
+        content: getAttr(attrs, "content"),
+        property: getAttr(attrs, "property"),
+        httpEquiv: getAttr(attrs, "http-equiv"),
+      });
+    } else {
+      results.push({ kind: "link", rel: getAttr(attrs, "rel"), href: getAttr(attrs, "href"), attrs });
+    }
   }
+
+  // Paired tags: <script> and <noscript>
+  const paired = /<(script|noscript)([^>]*?)>([\s\S]*?)<\/\1>/gi;
+  while ((m = paired.exec(raw)) !== null) {
+    const tag = m[1].toLowerCase() as "script" | "noscript";
+    const attrs = m[2];
+    const content = m[3].trim();
+    if (tag === "noscript") {
+      results.push({ kind: "noscript", content });
+    } else {
+      results.push({
+        kind: "script",
+        src: getAttr(attrs, "src"),
+        content,
+        async: /\basync\b/i.test(attrs),
+        defer: /\bdefer\b/i.test(attrs),
+      });
+    }
+  }
+
   return results;
 }
 
-function RenderScripts({ raw }: { raw?: string }) {
-  const tags = parseScriptTags(raw || "");
+function RenderHeadTags({ raw }: { raw?: string }) {
+  const tags = parseHeadElements(raw || "");
   return (
     <>
       {tags.map((tag, i) => {
-        if (tag.type === "noscript") {
+        if (tag.kind === "meta") {
+          return (
+            <meta
+              key={i}
+              {...(tag.name ? { name: tag.name } : {})}
+              {...(tag.property ? { property: tag.property } : {})}
+              {...(tag.httpEquiv ? { httpEquiv: tag.httpEquiv } : {})}
+              {...(tag.content !== undefined ? { content: tag.content } : {})}
+            />
+          );
+        }
+        if (tag.kind === "link") {
+          return <link key={i} rel={tag.rel} href={tag.href} />;
+        }
+        if (tag.kind === "noscript") {
           return <noscript key={i} dangerouslySetInnerHTML={{ __html: tag.content }} />;
         }
-        if (tag.src) {
-          const isAsync = /\basync\b/i.test(tag.attrs);
-          const isDefer = /\bdefer\b/i.test(tag.attrs);
-          return <script key={i} src={tag.src} async={isAsync} defer={isDefer} />;
+        if (tag.kind === "script") {
+          if (tag.src) {
+            return <script key={i} src={tag.src} async={tag.async} defer={tag.defer} />;
+          }
+          if (tag.content) {
+            return <script key={i} dangerouslySetInnerHTML={{ __html: tag.content }} />;
+          }
         }
-        if (tag.content) {
-          return <script key={i} dangerouslySetInnerHTML={{ __html: tag.content }} />;
+        return null;
+      })}
+    </>
+  );
+}
+
+function RenderBodyTags({ raw }: { raw?: string }) {
+  const tags = parseHeadElements(raw || "").filter(
+    (t) => t.kind === "script" || t.kind === "noscript"
+  );
+  return (
+    <>
+      {tags.map((tag, i) => {
+        if (tag.kind === "noscript") {
+          return <noscript key={i} dangerouslySetInnerHTML={{ __html: tag.content }} />;
+        }
+        if (tag.kind === "script") {
+          if (tag.src) return <script key={i} src={tag.src} async={tag.async} defer={tag.defer} />;
+          if (tag.content) return <script key={i} dangerouslySetInnerHTML={{ __html: tag.content }} />;
         }
         return null;
       })}
@@ -73,14 +147,14 @@ export default async function RootLayout({ children }: { children: React.ReactNo
   return (
     <html lang="fr">
       <head>
-        <RenderScripts raw={scripts.head_priority} />
-        <RenderScripts raw={scripts.head} />
-        <RenderScripts raw={scripts.head_legacy} />
+        <RenderHeadTags raw={scripts.head_priority} />
+        <RenderHeadTags raw={scripts.head} />
+        <RenderHeadTags raw={scripts.head_legacy} />
       </head>
       <body>
         <Providers>{children}</Providers>
-        <RenderScripts raw={scripts.body} />
-        <RenderScripts raw={scripts.body_legacy} />
+        <RenderBodyTags raw={scripts.body} />
+        <RenderBodyTags raw={scripts.body_legacy} />
       </body>
     </html>
   );
