@@ -13,7 +13,7 @@ type ScriptsPayload = {
 async function fetchScripts(): Promise<ScriptsPayload | null> {
   try {
     const res = await fetch(`${BACKEND}/api/v1/site-scripts`, {
-      next: { revalidate: 60 },
+      cache: "no-store",
     });
     if (!res.ok) return null;
     return res.json();
