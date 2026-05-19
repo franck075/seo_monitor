@@ -80,16 +80,21 @@ class AlertService:
 
     async def _eval_keyword_position_drop(self, rule: AlertRule, website_id: int) -> Tuple[bool, Optional[float], Dict]:
         result = await self.db.execute(
-            select(KeywordPosition)
+            select(KeywordPosition, Keyword.query)
+            .join(Keyword, Keyword.id == KeywordPosition.keyword_id)
             .where(KeywordPosition.website_id == website_id)
             .order_by(KeywordPosition.recorded_date.desc())
             .limit(200)
         )
-        rows = result.scalars().all()
+        rows = result.all()
         threshold = float(rule.threshold or 5)
-        for row in rows:
+        for row, query in rows:
             if row.position and row.position > threshold:
-                return True, float(row.position), {"keyword_id": row.keyword_id, "position": float(row.position)}
+                return True, float(row.position), {
+                    "keyword_id": row.keyword_id,
+                    "keyword": query,
+                    "position": float(row.position),
+                }
         return False, None, {}
 
     async def _eval_traffic_drop(self, rule: AlertRule, website_id: int) -> Tuple[bool, Optional[float], Dict]:
@@ -772,7 +777,7 @@ class AlertService:
         if "email" in rule.channels and recipient_email:
             try:
                 html = build_alert_email_html(ctx)
-                subject = build_alert_subject(rule.metric, site_domain)
+                subject = build_alert_subject(rule.metric, site_domain, context or {})
                 await send_alert_email(recipient_email, subject, html)
             except Exception:
                 pass

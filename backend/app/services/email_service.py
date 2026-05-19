@@ -28,9 +28,17 @@ async def send_alert_email(to: str, subject: str, body_html: str):
     )
 
 
-def build_alert_subject(metric: str, site: str) -> str:
+def build_alert_subject(metric: str, site: str, raw_context: Dict[str, Any] | None = None) -> str:
     info = get_metric_info(metric)
-    return f"[SEO Alert Scan] {info['label']} — {site}"
+    raw_context = raw_context or {}
+    extra = ""
+    if metric == "keyword_position_drop" and raw_context.get("keyword"):
+        extra = f' « {raw_context["keyword"]} »'
+    elif metric == "http_error" and raw_context.get("status_code"):
+        extra = f" (HTTP {raw_context['status_code']})"
+    elif metric == "seo_change_detected" and raw_context.get("field"):
+        extra = f" ({raw_context['field']})"
+    return f"[SEO Alert Scan] {info['label']}{extra} — {site}"
 
 
 def build_alert_email_html(context: Dict[str, Any]) -> str:

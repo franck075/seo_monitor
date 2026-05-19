@@ -197,9 +197,12 @@ def format_detail_html(metric: str, context: Dict[str, Any]) -> str:
     rows: list[str] = []
 
     if metric == "keyword_position_drop":
+        if context.get("keyword"):
+            rows.append(row(
+                "Mot-clé",
+                f'<span style="font-weight:700;color:#dc2626">{context["keyword"]}</span>',
+            ))
         rows.append(row("Position actuelle", f"#{context.get('position')}"))
-        if context.get("keyword_id"):
-            rows.append(row("ID du mot-clé", context["keyword_id"]))
     elif metric == "traffic_drop":
         rows.append(row("Sessions aujourd'hui", f"{context.get('latest_sessions', 0):,}".replace(",", " ")))
         rows.append(row("Moyenne 7 jours", f"{context.get('avg_7d_sessions', 0):,.0f}".replace(",", " ")))
@@ -300,6 +303,9 @@ def format_detail_text(metric: str, context: Dict[str, Any]) -> str:
         return ""
 
     if metric == "keyword_position_drop":
+        kw = context.get("keyword")
+        if kw:
+            return f'Mot-clé « {kw} » — position #{context.get("position")}'
         return f"Position actuelle : #{context.get('position')}"
     if metric == "traffic_drop":
         return (
