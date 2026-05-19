@@ -22,7 +22,7 @@ async def register(payload: UserCreate, db: AsyncSession = Depends(get_db)):
     try:
         result = await db.execute(select(User).where(User.email == payload.email))
         if result.scalar_one_or_none():
-            raise HTTPException(status_code=400, detail="Email already registered")
+            raise HTTPException(status_code=400, detail="Cet email est déjà utilisé")
         plan = payload.plan if payload.plan in VALID_PLANS else "starter"
         trial_ends = datetime.now(timezone.utc) + timedelta(days=7)
         user = User(
@@ -42,10 +42,10 @@ async def register(payload: UserCreate, db: AsyncSession = Depends(get_db)):
     except SQLAlchemyError:
         logger.exception("register: database error")
         await db.rollback()
-        raise HTTPException(status_code=500, detail="Registration failed, please try again")
+        raise HTTPException(status_code=500, detail="Inscription échouée, veuillez réessayer")
     except Exception:
         logger.exception("register: unexpected error")
-        raise HTTPException(status_code=500, detail="Registration failed, please try again")
+        raise HTTPException(status_code=500, detail="Inscription échouée, veuillez réessayer")
 
     token = create_access_token({"sub": str(user.id)})
     return RegisterResponse(access_token=token, user=UserOut.model_validate(user))
@@ -55,9 +55,9 @@ async def login(payload: UserLogin, db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(User).where(User.email == payload.email))
     user = result.scalar_one_or_none()
     if not user or not verify_password(payload.password, user.hashed_password):
-        raise HTTPException(status_code=401, detail="Invalid credentials")
+        raise HTTPException(status_code=401, detail="Email ou mot de passe incorrect")
     if not user.is_active:
-        raise HTTPException(status_code=403, detail="Account disabled")
+        raise HTTPException(status_code=403, detail="Compte désactivé")
     return TokenResponse(
         access_token=create_access_token({"sub": str(user.id)}),
         refresh_token=create_refresh_token({"sub": str(user.id)}),
