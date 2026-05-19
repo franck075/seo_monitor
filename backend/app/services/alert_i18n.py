@@ -176,6 +176,32 @@ SEVERITY_LABELS_FR = {
 }
 
 
+# Frontend sub-route per metric, appended to /sites/<id>. The link target is
+# chosen to land the recipient on the most relevant page for the alert.
+METRIC_DASHBOARD_PATH: Dict[str, str] = {
+    "keyword_position_drop": "/mots-cles",
+    "keyword_impressions_drop": "/mots-cles",
+    "keyword_clicks_drop": "/mots-cles",
+    "traffic_drop": "/trafic",
+    "traffic_spike": "/trafic",
+    "impressions_drop": "/trafic",
+    "clicks_drop": "/trafic",
+    "ctr_drop": "/trafic",
+    "page_impressions_drop": "/trafic",
+    "zero_organic_pages_monthly": "/trafic",
+    "vitals_degradation": "/performance",
+    "seo_change_detected": "/changements-seo",
+    "http_error": "/surveillance-http",
+    "robots_changed": "/sitemaps",
+    "sitemap_url_removed": "/sitemaps",
+    "indexation_error_spike": "/indexation",
+}
+
+
+def dashboard_path_for(metric: str) -> str:
+    return METRIC_DASHBOARD_PATH.get(metric, "")
+
+
 def get_metric_info(metric: str) -> Dict[str, str]:
     return METRIC_INFO.get(metric, DEFAULT_INFO)
 

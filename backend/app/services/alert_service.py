@@ -748,6 +748,7 @@ class AlertService:
     async def _dispatch_notifications(self, rule: AlertRule, event: AlertEvent, context: Dict[str, Any]):
         from app.services.email_service import send_alert_email, build_alert_email_html, build_alert_subject
         from app.services.telegram_service import send_telegram_message, build_alert_telegram_message
+        from app.services.alert_i18n import dashboard_path_for
         from app.config import settings
         from sqlalchemy import select
         from app.models.user import User
@@ -769,7 +770,10 @@ class AlertService:
             "metric": rule.metric,
             "raw_context": context or {},
             "detected_at": detected_at_fr,
-            "dashboard_url": f"{settings.FRONTEND_URL.rstrip('/')}/sites/{event.website_id}",
+            "dashboard_url": (
+                f"{settings.FRONTEND_URL.rstrip('/')}/sites/{event.website_id}"
+                f"{dashboard_path_for(rule.metric)}"
+            ),
         }
 
         recipient_email = getattr(user, "alert_email", None) or user.email
