@@ -1,5 +1,5 @@
 from fastapi import APIRouter
-from app.api.v1 import auth, websites, keywords, traffic, vitals, seo_changes, http_checks, sitemaps, indexation, alerts, links, admin, billing, support, insights, hack_detection, seo_issues, team
+from app.api.v1 import auth, websites, keywords, traffic, vitals, seo_changes, http_checks, sitemaps, indexation, alerts, links, admin, billing, support, insights, hack_detection, seo_issues, team, pages
 from app.api.v1.public_cms import public_router
 
 api_router = APIRouter(prefix="/api/v1")
@@ -21,4 +21,5 @@ api_router.include_router(insights.router)
 api_router.include_router(hack_detection.router)
 api_router.include_router(seo_issues.router)
 api_router.include_router(team.router)
+api_router.include_router(pages.router)
 api_router.include_router(public_router)
