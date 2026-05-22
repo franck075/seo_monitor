@@ -15,7 +15,7 @@ from app.db.session import get_db
 from app.deps import get_current_user, get_workspace_owner_id
 from app.models.user import User, UserAPICredential
 from app.models.website import Website
-from app.models.monitoring import SEOSnapshot, SitemapSnapshot, SitemapURL, HTTPCheck, CoreWebVital
+from app.models.monitoring import SEOSnapshot, SitemapSnapshot, SitemapURL, HTTPCheck, CoreWebVital, IndexationMonitor
 from app.core.crypto import decrypt_credentials
 
 router = APIRouter(prefix="/websites/{website_id}/quick-wins", tags=["quick-wins"])
@@ -85,6 +85,22 @@ QUICK_WINS_CATALOG = [
             "Si non → la supprimer et mettre en place une redirection 301 vers la page la plus proche thématiquement.",
             "Mettre à jour le sitemap pour ne plus lister les pages supprimées.",
             "Demander la mise à jour de l'indexation dans Google Search Console.",
+        ],
+    },
+    {
+        "id": "deindexed_pages_recovery",
+        "title": "Pages désindexées à récupérer",
+        "summary": (
+            "Une page peut être indexée un jour et disparaître sans alerte. Cette détection croise vos "
+            "monitors d'indexation pour repérer les pages bloquées par noindex, dupliquées sans canonique, "
+            "ou « explorées mais non indexées ». À traiter en priorité sur vos pages de vente/services."
+        ),
+        "recommendations": [
+            "Noindex involontaire → retirer la balise meta noindex (ou l'en-tête X-Robots-Tag) puis republier.",
+            "Doublon sans canonique → ajouter une balise <link rel=\"canonical\"> pointant vers l'URL principale.",
+            "Explorée mais non indexée → améliorer le contenu (trop court, trop similaire à une autre page) puis demander l'indexation.",
+            "Vérifier que la page n'est pas bloquée par robots.txt ni par un code HTTP 4xx/5xx.",
+            "Demander l'indexation manuelle dans Google Search Console après chaque correction.",
         ],
     },
     {
@@ -329,6 +345,102 @@ async def evaluate_low_ctr_high_impressions(
         "period": period,
         "items": candidates,
         "total_candidates": len(candidates),
+    }
+
+
+# Coverage states that indicate a page is NOT properly indexed and is recoverable.
+# Each state maps to a problem category that drives the recommendation shown to the user.
+DEINDEXED_STATE_CATEGORY = {
+    "BLOCKED_BY_META_TAG": "noindex",
+    "BLOCKED_BY_HTTP_HEADER": "noindex",
+    "BLOCKED_BY_ROBOTS_TXT": "blocked",
+    "DUPLICATE_WITHOUT_CANONICAL": "duplicate",
+    "DUPLICATE_WITH_PROPER_CANONICAL": "duplicate_alt",
+    "CRAWLED_CURRENTLY_NOT_INDEXED": "crawled_not_indexed",
+    "DISCOVERED_CURRENTLY_NOT_INDEXED": "discovered_not_indexed",
+    "SOFT_404": "soft_404",
+    "URL_UNKNOWN": "unknown",
+}
+
+CATEGORY_LABELS = {
+    "noindex": "Bloquée par noindex",
+    "blocked": "Bloquée par robots.txt",
+    "duplicate": "Doublon sans canonique",
+    "duplicate_alt": "Page alternative (canonique différente)",
+    "crawled_not_indexed": "Explorée mais non indexée",
+    "discovered_not_indexed": "Découverte mais non indexée",
+    "soft_404": "Soft 404",
+    "unknown": "Inconnue de Google",
+}
+
+CATEGORY_ACTIONS = {
+    "noindex": "Retirer la balise meta noindex (ou l'en-tête X-Robots-Tag) puis republier.",
+    "blocked": "Modifier robots.txt pour autoriser l'exploration de cette URL.",
+    "duplicate": "Ajouter une balise <link rel=\"canonical\"> pointant vers l'URL principale.",
+    "duplicate_alt": "Vérifier que la canonique cible la page que vous souhaitez voir indexée.",
+    "crawled_not_indexed": "Améliorer le contenu (trop court ou trop similaire à une autre page) puis demander l'indexation.",
+    "discovered_not_indexed": "Réduire la profondeur de la page (+ de liens internes) et améliorer la qualité du contenu.",
+    "soft_404": "Renvoyer un vrai code HTTP 404 ou enrichir la page pour qu'elle ait une valeur SEO.",
+    "unknown": "Soumettre la page à Google via URL Inspection puis demander l'indexation.",
+}
+
+
+async def evaluate_deindexed_pages(
+    site: Website,
+    db: AsyncSession,
+    limit: int = 100,
+) -> Dict[str, Any]:
+    """QW #7: monitored pages whose latest coverage state indicates they aren't indexed."""
+    bad_states = list(DEINDEXED_STATE_CATEGORY.keys())
+    monitors = (await db.execute(
+        select(IndexationMonitor)
+        .where(
+            IndexationMonitor.website_id == site.id,
+            IndexationMonitor.is_active == True,
+            IndexationMonitor.last_coverage_state.in_(bad_states),
+        )
+        .order_by(desc(IndexationMonitor.last_checked_at))
+        .limit(limit)
+    )).scalars().all()
+
+    if not monitors:
+        # Differentiate: no monitors configured at all vs. monitors all healthy
+        any_monitor = (await db.execute(
+            select(IndexationMonitor.id).where(IndexationMonitor.website_id == site.id).limit(1)
+        )).scalar_one_or_none()
+        if not any_monitor:
+            return {
+                "has_data": False,
+                "reason": (
+                    "Aucune URL monitorée pour l'indexation. Ajoutez vos pages clés depuis "
+                    "Indexation pour suivre leur état dans Google."
+                ),
+                "items": [],
+            }
+        return {"has_data": True, "items": [], "total_candidates": 0, "groups": {}}
+
+    items: List[Dict[str, Any]] = []
+    groups: Dict[str, int] = {}
+    for m in monitors:
+        state = m.last_coverage_state or ""
+        category = DEINDEXED_STATE_CATEGORY.get(state, "unknown")
+        groups[category] = groups.get(category, 0) + 1
+        items.append({
+            "page": m.url,
+            "label": m.label,
+            "coverage_state": state,
+            "category": category,
+            "category_label": CATEGORY_LABELS.get(category, category),
+            "action": CATEGORY_ACTIONS.get(category, ""),
+            "last_crawl_time": m.last_crawl_time.isoformat() if m.last_crawl_time else None,
+            "last_checked_at": m.last_checked_at.isoformat() if m.last_checked_at else None,
+        })
+
+    return {
+        "has_data": True,
+        "items": items,
+        "total_candidates": len(items),
+        "groups": groups,
     }
 
 
@@ -694,6 +806,18 @@ async def quick_win_top_3_consolidate(
     return await evaluate_top_3_consolidate(
         site, db, period=period, min_impressions=min_impressions, limit=limit
     )
+
+
+@router.get("/deindexed-pages")
+async def quick_win_deindexed_pages(
+    website_id: int,
+    limit: int = Query(100, ge=1, le=500),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    effective_owner_id: int = Depends(get_workspace_owner_id),
+):
+    site = await _verify_site(website_id, db, effective_owner_id)
+    return await evaluate_deindexed_pages(site, db, limit=limit)
 
 
 @router.get("/mobile-vs-desktop-gap")

@@ -5,7 +5,7 @@ import Link from "next/link";
 import { api } from "@/lib/api";
 import { Sidebar } from "@/components/layout/Sidebar";
 import { TopNav } from "@/components/layout/TopNav";
-import { Sparkles, ExternalLink, Check, X, Search, ChevronDown, ChevronUp, Eye, Smartphone, Monitor } from "lucide-react";
+import { Sparkles, ExternalLink, Check, X, Search, ChevronDown, ChevronUp, Eye, Smartphone, Monitor, AlertTriangle } from "lucide-react";
 
 type Catalog = {
   quick_wins: { id: string; title: string; summary: string; recommendations: string[] }[];
@@ -276,6 +276,165 @@ type MobileDesktopResponse = {
   has_data: boolean; reason?: string; period?: number;
   items: MobileDesktopItem[]; total_candidates?: number;
 };
+
+type DeindexedItem = {
+  page: string; label: string | null;
+  coverage_state: string;
+  category: string;
+  category_label: string;
+  action: string;
+  last_crawl_time: string | null;
+  last_checked_at: string | null;
+};
+type DeindexedResponse = {
+  has_data: boolean; reason?: string;
+  items: DeindexedItem[];
+  total_candidates?: number;
+  groups?: Record<string, number>;
+};
+
+const CATEGORY_COLORS: Record<string, string> = {
+  noindex: "bg-red-50 text-red-700 border-red-200",
+  blocked: "bg-red-50 text-red-700 border-red-200",
+  duplicate: "bg-amber-50 text-amber-700 border-amber-200",
+  duplicate_alt: "bg-gray-50 text-gray-700 border-gray-200",
+  crawled_not_indexed: "bg-orange-50 text-orange-700 border-orange-200",
+  discovered_not_indexed: "bg-orange-50 text-orange-700 border-orange-200",
+  soft_404: "bg-red-50 text-red-700 border-red-200",
+  unknown: "bg-gray-50 text-gray-700 border-gray-200",
+};
+
+function DeindexedPagesCard({ siteId }: { siteId: string }) {
+  const [open, setOpen] = useState(false);
+
+  const { data, isLoading } = useQuery<DeindexedResponse>({
+    queryKey: ["qw-deindexed", siteId],
+    queryFn: async () =>
+      (await api.get(`/websites/${siteId}/quick-wins/deindexed-pages`)).data,
+  });
+
+  return (
+    <div className="bg-white rounded-2xl border border-gray-200 overflow-hidden">
+      <div className="p-5 border-b border-gray-100">
+        <div className="flex items-start justify-between gap-4">
+          <div className="flex-1">
+            <div className="flex items-center gap-2 mb-2">
+              <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-blue-50 text-blue-700 rounded text-xs font-semibold">
+                <Sparkles className="w-3 h-3" /> Quick Win #7
+              </span>
+              {data?.has_data && data.total_candidates !== undefined && data.total_candidates > 0 && (
+                <span className="text-xs text-red-600 font-medium inline-flex items-center gap-1">
+                  <AlertTriangle className="w-3 h-3" />
+                  {data.total_candidates} page{data.total_candidates > 1 ? "s" : ""} non indexée{data.total_candidates > 1 ? "s" : ""}
+                </span>
+              )}
+            </div>
+            <h3 className="text-lg font-bold text-gray-900">Pages désindexées à récupérer</h3>
+            <p className="text-sm text-gray-500 mt-1">
+              Vos URLs monitorées qui ne sont pas indexées par Google. Chaque cause a une action précise
+              à mener pour les remettre en ligne.
+            </p>
+          </div>
+        </div>
+
+        <button onClick={() => setOpen(!open)}
+          className="mt-3 inline-flex items-center gap-1 text-xs text-blue-600 hover:underline">
+          {open ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+          {open ? "Masquer" : "Afficher"} les recommandations générales
+        </button>
+
+        {open && (
+          <ol className="mt-3 space-y-1.5 text-sm text-gray-700 list-decimal list-inside pl-1">
+            <li><b>Noindex involontaire</b> → retirer la balise meta noindex (ou l'en-tête X-Robots-Tag).</li>
+            <li><b>Doublon sans canonique</b> → ajouter <code className="text-xs bg-gray-100 px-1 py-0.5 rounded">&lt;link rel="canonical"&gt;</code> vers l'URL principale.</li>
+            <li><b>Explorée mais non indexée</b> → enrichir le contenu (trop court ou trop similaire) puis demander l'indexation.</li>
+            <li>Vérifier que la page n'est pas bloquée par robots.txt ni par un code 4xx/5xx.</li>
+            <li>Priorité absolue à vos pages de vente / services qui doivent être indexées.</li>
+          </ol>
+        )}
+
+        {data?.has_data && data.groups && Object.keys(data.groups).length > 0 && (
+          <div className="flex flex-wrap gap-2 mt-3">
+            {Object.entries(data.groups).map(([cat, count]) => (
+              <span key={cat} className={`text-xs px-2 py-1 rounded border ${CATEGORY_COLORS[cat] || "bg-gray-50 text-gray-700 border-gray-200"}`}>
+                {count} × {cat.replace(/_/g, " ")}
+              </span>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {isLoading && <div className="p-8 text-center text-gray-400">Chargement…</div>}
+
+      {!isLoading && data && !data.has_data && (
+        <div className="p-5 bg-amber-50 border-t border-amber-200 text-amber-800 text-sm">
+          <p className="font-semibold">Aucune URL monitorée</p>
+          <p>{data.reason}</p>
+        </div>
+      )}
+
+      {!isLoading && data?.has_data && data.items.length === 0 && (
+        <div className="p-8 text-center text-gray-500 text-sm">
+          🎉 Toutes vos URLs monitorées sont correctement indexées par Google.
+        </div>
+      )}
+
+      {!isLoading && data?.has_data && data.items.length > 0 && (
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead className="bg-gray-50 text-xs text-gray-500 uppercase">
+              <tr>
+                <th className="text-left px-4 py-3 font-semibold">Page</th>
+                <th className="text-left px-3 py-3 font-semibold">Cause</th>
+                <th className="text-left px-3 py-3 font-semibold">Action recommandée</th>
+                <th className="text-right px-3 py-3 font-semibold">Dernier check</th>
+                <th className="px-3 py-3"></th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-100">
+              {data.items.map((it) => (
+                <tr key={it.page} className="hover:bg-gray-50">
+                  <td className="px-4 py-3 max-w-xs">
+                    <a href={it.page} target="_blank" rel="noopener"
+                      className="text-blue-600 hover:underline inline-flex items-center gap-1 truncate"
+                      title={it.page}>
+                      <span className="truncate">{shortenUrl(it.page)}</span>
+                      <ExternalLink className="w-3 h-3 flex-shrink-0" />
+                    </a>
+                    {it.label && <div className="text-xs text-gray-400 truncate" title={it.label}>{it.label}</div>}
+                  </td>
+                  <td className="px-3 py-3">
+                    <span className={`text-xs px-2 py-1 rounded border ${CATEGORY_COLORS[it.category] || "bg-gray-50 text-gray-700 border-gray-200"}`}>
+                      {it.category_label}
+                    </span>
+                  </td>
+                  <td className="px-3 py-3 text-sm text-gray-700 max-w-md">
+                    {it.action}
+                  </td>
+                  <td className="px-3 py-3 text-right text-xs text-gray-500">
+                    {it.last_checked_at
+                      ? new Date(it.last_checked_at).toLocaleDateString("fr-FR")
+                      : "—"}
+                  </td>
+                  <td className="px-3 py-3 text-right">
+                    <a
+                      href={`https://search.google.com/search-console/inspect?resource_id=&url=${encodeURIComponent(it.page)}`}
+                      target="_blank" rel="noopener"
+                      className="inline-flex items-center gap-1 px-2 py-1.5 text-xs border border-gray-200 rounded-md hover:bg-gray-50"
+                      title="Inspecter dans Google Search Console"
+                    >
+                      <Search className="w-3 h-3" /> GSC
+                    </a>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
 
 function MobileVsDesktopCard({ siteId }: { siteId: string }) {
   const [period, setPeriod] = useState(28);
@@ -1013,6 +1172,7 @@ export default function QuickWinsPage({ params }: { params: { id: string } }) {
             </p>
           </div>
 
+          <DeindexedPagesCard siteId={id} />
           <Position4_15Card siteId={id} />
           <LowCtrCard siteId={id} />
           <Top3LowCtrCard siteId={id} />
