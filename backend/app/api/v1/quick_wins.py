@@ -15,7 +15,7 @@ from app.db.session import get_db
 from app.deps import get_current_user, get_workspace_owner_id
 from app.models.user import User, UserAPICredential
 from app.models.website import Website
-from app.models.monitoring import SEOSnapshot
+from app.models.monitoring import SEOSnapshot, SitemapSnapshot, SitemapURL, HTTPCheck
 from app.core.crypto import decrypt_credentials
 
 router = APIRouter(prefix="/websites/{website_id}/quick-wins", tags=["quick-wins"])
@@ -69,6 +69,22 @@ QUICK_WINS_CATALOG = [
             "Ouvrir vos pages les plus visitées (panneau « Pages sources ») et y ajouter des liens internes vers ces pages cibles.",
             "Utiliser comme ancre la requête ou une variation proche (sans sur-optimiser).",
             "Pour vérifier les liens internes existants, lancez sur Google : site:votredomaine.com \"ancre attendue\".",
+        ],
+    },
+    {
+        "id": "zero_traffic_pages",
+        "title": "Pages indexées sans trafic — à optimiser ou supprimer",
+        "summary": (
+            "Ces pages apparaissent dans votre sitemap mais n'ont reçu aucune impression Google sur les "
+            "3 derniers mois. Elles diluent votre budget de crawl et ne servent à rien : optimisez-les "
+            "ou supprimez-les avec une redirection 301."
+        ),
+        "recommendations": [
+            "Pour chaque page sans trafic : déterminer si elle a une intention de recherche réelle.",
+            "Si oui → l'optimiser : titre, H1, contenu, maillage interne — viser un vrai mot-clé.",
+            "Si non → la supprimer et mettre en place une redirection 301 vers la page la plus proche thématiquement.",
+            "Mettre à jour le sitemap pour ne plus lister les pages supprimées.",
+            "Demander la mise à jour de l'indexation dans Google Search Console.",
         ],
     },
 ]
@@ -284,6 +300,97 @@ async def evaluate_low_ctr_high_impressions(
     }
 
 
+async def evaluate_zero_traffic_pages(
+    site: Website,
+    db: AsyncSession,
+    period: int = 90,
+    limit: int = 50,
+) -> Dict[str, Any]:
+    """QW #4: pages in the sitemap that received zero GSC impressions over the period."""
+    # 1. Latest sitemap snapshot
+    snap = (await db.execute(
+        select(SitemapSnapshot)
+        .where(SitemapSnapshot.website_id == site.id)
+        .order_by(desc(SitemapSnapshot.recorded_at))
+        .limit(1)
+    )).scalar_one_or_none()
+    if not snap:
+        return {
+            "has_data": False,
+            "reason": "Aucun sitemap n'a encore été collecté pour ce site.",
+            "items": [],
+        }
+
+    sitemap_urls: List[str] = (await db.execute(
+        select(SitemapURL.url).where(SitemapURL.snapshot_id == snap.id)
+    )).scalars().all()
+    if not sitemap_urls:
+        return {
+            "has_data": False,
+            "reason": "Le sitemap collecté ne contient aucune URL.",
+            "items": [],
+        }
+
+    # 2. GSC pages with impressions over the period
+    gsc = await _gsc_for_site(site, db)
+    if not gsc:
+        return {
+            "has_data": False,
+            "reason": "GSC non configuré pour ce site.",
+            "items": [],
+        }
+    end = date.today()
+    start = end - timedelta(days=period - 1)
+    try:
+        gsc_pages = gsc.get_top_pages_for_period(str(start), str(end))
+    except Exception as e:
+        return {"has_data": False, "reason": str(e), "items": []}
+
+    def normalize(u: str) -> str:
+        return (u or "").rstrip("/").lower()
+
+    pages_with_traffic = {normalize(p["page"]) for p in gsc_pages if p["impressions"] > 0}
+
+    # 3. Diff
+    zero_traffic_urls = [u for u in sitemap_urls if normalize(u) not in pages_with_traffic]
+    total_zero = len(zero_traffic_urls)
+    sample = zero_traffic_urls[:limit]
+
+    # 4. Pull whatever context we have (title, HTTP status) for the sample
+    snapshots = await _latest_snapshots_for_pages(db, site.id, sample)
+
+    http_rows = (await db.execute(
+        select(HTTPCheck)
+        .where(HTTPCheck.website_id == site.id, HTTPCheck.page_url.in_(sample))
+        .order_by(HTTPCheck.page_url, desc(HTTPCheck.checked_at))
+    )).scalars().all()
+    http_by_url: Dict[str, HTTPCheck] = {}
+    for c in http_rows:
+        http_by_url.setdefault(c.page_url, c)
+
+    items: List[Dict[str, Any]] = []
+    for url in sample:
+        s = snapshots.get(url)
+        h = http_by_url.get(url)
+        items.append({
+            "page": url,
+            "title": s.title if s else None,
+            "h1": s.h1 if s else None,
+            "status_code": h.status_code if h else None,
+            "last_seen_snapshot": s.recorded_at.isoformat() if s and s.recorded_at else None,
+            "last_http_check": h.checked_at.isoformat() if h and h.checked_at else None,
+        })
+
+    return {
+        "has_data": True,
+        "period": period,
+        "items": items,
+        "total_candidates": total_zero,
+        "sitemap_total_urls": len(sitemap_urls),
+        "sitemap_recorded_at": snap.recorded_at.isoformat() if snap.recorded_at else None,
+    }
+
+
 async def evaluate_top_3_consolidate(
     site: Website,
     db: AsyncSession,
@@ -413,3 +520,16 @@ async def quick_win_top_3_consolidate(
     return await evaluate_top_3_consolidate(
         site, db, period=period, min_impressions=min_impressions, limit=limit
     )
+
+
+@router.get("/zero-traffic-pages")
+async def quick_win_zero_traffic_pages(
+    website_id: int,
+    period: int = Query(90, ge=7, le=365),
+    limit: int = Query(50, ge=1, le=500),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    effective_owner_id: int = Depends(get_workspace_owner_id),
+):
+    site = await _verify_site(website_id, db, effective_owner_id)
+    return await evaluate_zero_traffic_pages(site, db, period=period, limit=limit)

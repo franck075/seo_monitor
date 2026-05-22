@@ -230,6 +230,152 @@ type Top3Response = {
   source_pages: Top3SourcePage[];
 };
 
+type ZeroTrafficItem = {
+  page: string;
+  title: string | null;
+  h1: string | null;
+  status_code: number | null;
+  last_seen_snapshot: string | null;
+  last_http_check: string | null;
+};
+type ZeroTrafficResponse = {
+  has_data: boolean; reason?: string; period?: number;
+  items: ZeroTrafficItem[];
+  total_candidates?: number;
+  sitemap_total_urls?: number;
+  sitemap_recorded_at?: string;
+};
+
+function ZeroTrafficCard({ siteId }: { siteId: string }) {
+  const [period, setPeriod] = useState(90);
+  const [open, setOpen] = useState(false);
+
+  const { data, isLoading } = useQuery<ZeroTrafficResponse>({
+    queryKey: ["qw-zero-traffic", siteId, period],
+    queryFn: async () =>
+      (await api.get(`/websites/${siteId}/quick-wins/zero-traffic-pages?period=${period}`)).data,
+  });
+
+  return (
+    <div className="bg-white rounded-2xl border border-gray-200 overflow-hidden">
+      <div className="p-5 border-b border-gray-100">
+        <div className="flex items-start justify-between gap-4">
+          <div className="flex-1">
+            <div className="flex items-center gap-2 mb-2">
+              <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-blue-50 text-blue-700 rounded text-xs font-semibold">
+                <Sparkles className="w-3 h-3" /> Quick Win #4
+              </span>
+              {data?.has_data && data.total_candidates !== undefined && (
+                <span className="text-xs text-gray-500">
+                  {data.total_candidates} page{data.total_candidates > 1 ? "s" : ""} sans trafic
+                  {data.sitemap_total_urls ? ` sur ${data.sitemap_total_urls} indexée${data.sitemap_total_urls > 1 ? "s" : ""}` : ""}
+                </span>
+              )}
+            </div>
+            <h3 className="text-lg font-bold text-gray-900">Pages indexées sans trafic — à optimiser ou supprimer</h3>
+            <p className="text-sm text-gray-500 mt-1">
+              Ces pages sont dans votre sitemap mais n'ont reçu aucune impression Google sur la période.
+              Elles diluent votre budget de crawl : optimisez-les ou supprimez-les avec une 301.
+            </p>
+          </div>
+          <select value={period} onChange={(e) => setPeriod(Number(e.target.value))}
+            className="border border-gray-200 rounded-lg px-3 py-1.5 text-sm bg-white">
+            <option value={30}>30 jours</option>
+            <option value={90}>90 jours</option>
+            <option value={180}>6 mois</option>
+            <option value={365}>12 mois</option>
+          </select>
+        </div>
+
+        <button onClick={() => setOpen(!open)}
+          className="mt-3 inline-flex items-center gap-1 text-xs text-blue-600 hover:underline">
+          {open ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+          {open ? "Masquer" : "Afficher"} les recommandations
+        </button>
+
+        {open && (
+          <ol className="mt-3 space-y-1.5 text-sm text-gray-700 list-decimal list-inside pl-1">
+            <li>Pour chaque page : déterminez si elle vise une <b>intention de recherche réelle</b>.</li>
+            <li><b>Si oui</b> → optimisez (title, H1, contenu, maillage interne) en visant un mot-clé spécifique.</li>
+            <li><b>Si non</b> → supprimez-la et mettez en place une <b>redirection 301</b> vers la page la plus proche thématiquement.</li>
+            <li>Mettez à jour le sitemap pour ne plus lister les pages supprimées.</li>
+            <li>Demandez la mise à jour de l'indexation dans Google Search Console.</li>
+          </ol>
+        )}
+
+        {data?.sitemap_recorded_at && (
+          <p className="mt-3 text-xs text-gray-400">
+            Comparaison basée sur le sitemap collecté le {new Date(data.sitemap_recorded_at).toLocaleDateString("fr-FR")}.
+          </p>
+        )}
+      </div>
+
+      {isLoading && <div className="p-8 text-center text-gray-400">Chargement…</div>}
+
+      {!isLoading && data && !data.has_data && (
+        <div className="p-5 bg-amber-50 border-t border-amber-200 text-amber-800 text-sm">
+          <p className="font-semibold">Données indisponibles</p>
+          <p>{data.reason}</p>
+        </div>
+      )}
+
+      {!isLoading && data?.has_data && data.items.length === 0 && (
+        <div className="p-8 text-center text-gray-500 text-sm">
+          🎉 Aucune page de votre sitemap sans trafic sur cette période. Excellent.
+        </div>
+      )}
+
+      {!isLoading && data?.has_data && data.items.length > 0 && (
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead className="bg-gray-50 text-xs text-gray-500 uppercase">
+              <tr>
+                <th className="text-left px-4 py-3 font-semibold">Page sans trafic</th>
+                <th className="text-left px-3 py-3 font-semibold">Title</th>
+                <th className="text-right px-3 py-3 font-semibold">HTTP</th>
+                <th className="px-3 py-3"></th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-100">
+              {data.items.map((it) => (
+                <tr key={it.page} className="hover:bg-gray-50">
+                  <td className="px-4 py-3 max-w-md">
+                    <a href={it.page} target="_blank" rel="noopener"
+                      className="text-blue-600 hover:underline inline-flex items-center gap-1 truncate"
+                      title={it.page}>
+                      <span className="truncate">{shortenUrl(it.page)}</span>
+                      <ExternalLink className="w-3 h-3 flex-shrink-0" />
+                    </a>
+                  </td>
+                  <td className="px-3 py-3 max-w-xs">
+                    {it.title
+                      ? <span className="text-xs text-gray-700 line-clamp-2" title={it.title}>{it.title}</span>
+                      : <span className="text-xs text-gray-400 italic">Non collecté</span>}
+                  </td>
+                  <td className="px-3 py-3 text-right tabular-nums">
+                    {it.status_code
+                      ? <span className={it.status_code >= 400 ? "text-red-600 font-semibold" : "text-gray-700"}>{it.status_code}</span>
+                      : <span className="text-gray-400">—</span>}
+                  </td>
+                  <td className="px-3 py-3 text-right">
+                    <Link
+                      href={`/sites/${siteId}/page-details?url=${encodeURIComponent(it.page)}&period=90`}
+                      className="inline-flex items-center gap-1 px-2 py-1.5 text-xs border border-gray-200 rounded-md hover:bg-gray-50"
+                      title="Voir les détails de la page"
+                    >
+                      <Eye className="w-3 h-3" /> Détails
+                    </Link>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function Top3ConsolidateCard({ siteId, domain }: { siteId: string; domain?: string }) {
   const [period, setPeriod] = useState(28);
   const [open, setOpen] = useState(false);
@@ -542,6 +688,7 @@ export default function QuickWinsPage({ params }: { params: { id: string } }) {
           <Position4_15Card siteId={id} />
           <LowCtrCard siteId={id} />
           <Top3ConsolidateCard siteId={id} domain={website?.domain} />
+          <ZeroTrafficCard siteId={id} />
         </main>
       </div>
     </div>
