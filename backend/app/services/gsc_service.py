@@ -211,6 +211,42 @@ class GSCService:
             for r in rows
         ]
 
+    def get_query_page_pairs(self, start_date: str, end_date: str, row_limit: int = 25000) -> List[Dict[str, Any]]:
+        """Aggregated GSC metrics per (query, page) pair over a period.
+
+        Used to identify the top query driving traffic to each page.
+        Paginates through all results.
+        """
+        results = []
+        start_row = 0
+        while True:
+            body = {
+                "startDate": start_date,
+                "endDate": end_date,
+                "dimensions": ["page", "query"],
+                "rowLimit": row_limit,
+                "startRow": start_row,
+                "dataState": "all",
+            }
+            response = self.service.searchanalytics().query(siteUrl=self.site_url, body=body).execute()
+            rows = response.get("rows", [])
+            if not rows:
+                break
+            for row in rows:
+                keys = row.get("keys", [])
+                results.append({
+                    "page": keys[0] if len(keys) > 0 else "",
+                    "query": keys[1] if len(keys) > 1 else "",
+                    "clicks": int(row.get("clicks", 0)),
+                    "impressions": int(row.get("impressions", 0)),
+                    "ctr": round(float(row.get("ctr", 0.0)) * 100, 2),
+                    "position": round(float(row.get("position", 0.0)), 1),
+                })
+            if len(rows) < row_limit:
+                break
+            start_row += row_limit
+        return results
+
     def get_site_performance(self, days: int = 1) -> Dict[str, Any]:
         end_date = datetime.now().strftime("%Y-%m-%d")
         start_date = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")

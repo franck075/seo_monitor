@@ -6,7 +6,7 @@ import { Sidebar } from "@/components/layout/Sidebar";
 import { TopNav } from "@/components/layout/TopNav";
 import { MetricCard } from "@/components/cards/MetricCard";
 import Link from "next/link";
-import { BarChart2, Globe, Shield, Activity, FileText, AlertTriangle, Map, RefreshCw, Check, Lightbulb, SearchCheck, MousePointerClick, Eye, Percent, Hash, FileStack } from "lucide-react";
+import { BarChart2, Globe, Shield, Activity, FileText, AlertTriangle, Map, RefreshCw, Check, Lightbulb, SearchCheck, MousePointerClick, Eye, Percent, Hash, FileStack, Sparkles } from "lucide-react";
 
 type KeywordStats = {
   total_keywords: number;
@@ -48,6 +48,7 @@ export default function WebsiteDetailPage({ params }: { params: { id: string } }
   });
 
   const quickLinks = [
+    { href: `/sites/${id}/quick-wins`, label: "Quick Wins", icon: Sparkles },
     { href: `/sites/${id}/top-pages`, label: "Top pages", icon: FileStack },
     { href: `/sites/${id}/mots-cles`, label: "Mots-clés", icon: BarChart2 },
     { href: `/sites/${id}/trafic`, label: "Trafic", icon: Activity },
