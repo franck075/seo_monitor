@@ -1,6 +1,7 @@
 "use client";
 import { useState, Suspense } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { useSearchParams } from "next/navigation";
 import { api } from "@/lib/api";
 import { Sidebar } from "@/components/layout/Sidebar";
 import { TopNav } from "@/components/layout/TopNav";
@@ -119,13 +120,10 @@ function VitalsBlock({ title, v }: { title: string; v: Vital | null }) {
 }
 
 function PageDetailsContent({ id }: { id: string }) {
-  const [url] = useState(() => typeof window !== "undefined"
-    ? new URLSearchParams(window.location.search).get("url") || ""
-    : "");
-  const [periodInit] = useState(() => typeof window !== "undefined"
-    ? Number(new URLSearchParams(window.location.search).get("period") || 28)
-    : 28);
-  const [period, setPeriod] = useState(periodInit);
+  const searchParams = useSearchParams();
+  const url = searchParams.get("url") || "";
+  const initialPeriod = Number(searchParams.get("period") || 28);
+  const [period, setPeriod] = useState(initialPeriod);
 
   const { data, isLoading } = useQuery<PageDetails>({
     queryKey: ["page-details", id, url, period],
