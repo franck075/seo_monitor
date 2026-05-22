@@ -218,6 +218,168 @@ function LowCtrCard({ siteId }: { siteId: string }) {
   );
 }
 
+type Top3Item = {
+  page: string; query: string; position: number;
+  impressions: number; clicks: number; ctr: number;
+  google_search_url: string;
+};
+type Top3SourcePage = { page: string; clicks: number; impressions: number };
+type Top3Response = {
+  has_data: boolean; reason?: string; period?: number;
+  items: Top3Item[]; total_candidates?: number;
+  source_pages: Top3SourcePage[];
+};
+
+function Top3ConsolidateCard({ siteId, domain }: { siteId: string; domain?: string }) {
+  const [period, setPeriod] = useState(28);
+  const [open, setOpen] = useState(false);
+
+  const { data, isLoading } = useQuery<Top3Response>({
+    queryKey: ["qw-top-3", siteId, period],
+    queryFn: async () =>
+      (await api.get(`/websites/${siteId}/quick-wins/top-3-consolidate?period=${period}`)).data,
+  });
+
+  return (
+    <div className="bg-white rounded-2xl border border-gray-200 overflow-hidden">
+      <div className="p-5 border-b border-gray-100">
+        <div className="flex items-start justify-between gap-4">
+          <div className="flex-1">
+            <div className="flex items-center gap-2 mb-2">
+              <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-blue-50 text-blue-700 rounded text-xs font-semibold">
+                <Sparkles className="w-3 h-3" /> Quick Win #3
+              </span>
+              {data?.has_data && data.total_candidates !== undefined && (
+                <span className="text-xs text-gray-500">
+                  {data.total_candidates} requête{data.total_candidates > 1 ? "s" : ""} en Top 3
+                </span>
+              )}
+            </div>
+            <h3 className="text-lg font-bold text-gray-900">Requêtes en position 1–3 à consolider</h3>
+            <p className="text-sm text-gray-500 mt-1">
+              Vos meilleures positions sont des actifs précieux mais fragiles : renforcez les pages cibles
+              avec des liens internes depuis vos pages les plus visitées pour solidifier leur autorité.
+            </p>
+          </div>
+          <select value={period} onChange={(e) => setPeriod(Number(e.target.value))}
+            className="border border-gray-200 rounded-lg px-3 py-1.5 text-sm bg-white">
+            {PERIODS.map((p) => <option key={p.value} value={p.value}>{p.label}</option>)}
+          </select>
+        </div>
+
+        <button onClick={() => setOpen(!open)}
+          className="mt-3 inline-flex items-center gap-1 text-xs text-blue-600 hover:underline">
+          {open ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+          {open ? "Masquer" : "Afficher"} les recommandations
+        </button>
+
+        {open && (
+          <ol className="mt-3 space-y-1.5 text-sm text-gray-700 list-decimal list-inside pl-1">
+            <li>Repérez la <b>page cible</b> de chaque requête en Top 3 (tableau ci-dessous).</li>
+            <li>Ouvrez vos <b>pages sources</b> les plus visitées (panneau de droite) et y ajoutez un lien interne vers la page cible.</li>
+            <li>Utilisez comme texte d'ancre la <b>requête ou une variation proche</b> (sans sur-optimiser).</li>
+            <li>Pour vérifier si un lien interne existe déjà, recherchez sur Google : <code className="text-xs bg-gray-100 px-1 py-0.5 rounded">site:{domain || "votredomaine.com"} "ancre attendue"</code>.</li>
+            <li>Republiez les pages sources puis demandez l'indexation dans Google Search Console.</li>
+          </ol>
+        )}
+      </div>
+
+      {isLoading && <div className="p-8 text-center text-gray-400">Chargement…</div>}
+
+      {!isLoading && data && !data.has_data && (
+        <div className="p-5 bg-amber-50 border-t border-amber-200 text-amber-800 text-sm">
+          <p className="font-semibold">Données GSC indisponibles</p>
+          <p>{data.reason || "Configurez Google Search Console pour ce site."}</p>
+        </div>
+      )}
+
+      {!isLoading && data?.has_data && data.items.length === 0 && (
+        <div className="p-8 text-center text-gray-500 text-sm">
+          Aucune requête en position 1–3 avec suffisamment d'impressions sur cette période.
+        </div>
+      )}
+
+      {!isLoading && data?.has_data && data.items.length > 0 && (
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-0">
+          <div className="lg:col-span-2 overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="bg-gray-50 text-xs text-gray-500 uppercase">
+                <tr>
+                  <th className="text-left px-4 py-3 font-semibold">Requête</th>
+                  <th className="text-left px-3 py-3 font-semibold">Page cible</th>
+                  <th className="text-right px-3 py-3 font-semibold">Position</th>
+                  <th className="text-right px-3 py-3 font-semibold">Impressions</th>
+                  <th className="text-right px-3 py-3 font-semibold">Clics</th>
+                  <th className="px-3 py-3"></th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                {data.items.map((it, i) => (
+                  <tr key={`${it.page}-${it.query}-${i}`} className="hover:bg-gray-50">
+                    <td className="px-4 py-3 max-w-xs">
+                      <div className="font-medium text-gray-900 truncate" title={it.query}>{it.query}</div>
+                    </td>
+                    <td className="px-3 py-3 max-w-xs">
+                      <a href={it.page} target="_blank" rel="noopener"
+                        className="text-blue-600 hover:underline inline-flex items-center gap-1 truncate"
+                        title={it.page}>
+                        <span className="truncate">{shortenUrl(it.page)}</span>
+                        <ExternalLink className="w-3 h-3 flex-shrink-0" />
+                      </a>
+                    </td>
+                    <td className="px-3 py-3 text-right tabular-nums font-semibold text-green-600">{it.position.toFixed(1)}</td>
+                    <td className="px-3 py-3 text-right tabular-nums">{fmt(it.impressions)}</td>
+                    <td className="px-3 py-3 text-right tabular-nums">{fmt(it.clicks)}</td>
+                    <td className="px-3 py-3 text-right">
+                      <div className="flex justify-end gap-1.5">
+                        <a href={it.google_search_url} target="_blank" rel="noopener"
+                          className="inline-flex items-center gap-1 px-2 py-1.5 text-xs border border-gray-200 rounded-md hover:bg-gray-50"
+                          title="Voir la SERP Google">
+                          <Search className="w-3 h-3" />
+                        </a>
+                        <Link
+                          href={`/sites/${siteId}/page-details?url=${encodeURIComponent(it.page)}&period=${period}`}
+                          className="inline-flex items-center gap-1 px-2 py-1.5 text-xs border border-gray-200 rounded-md hover:bg-gray-50"
+                          title="Voir les détails de la page"
+                        >
+                          <Eye className="w-3 h-3" />
+                        </Link>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <aside className="bg-gray-50 border-l border-gray-100 p-5">
+            <h4 className="text-sm font-semibold text-gray-900 mb-1">Pages sources recommandées</h4>
+            <p className="text-xs text-gray-500 mb-3">Ajoutez vos liens internes depuis ces pages — ce sont vos pages les plus visitées sur la période.</p>
+            <ol className="space-y-2.5">
+              {data.source_pages.map((sp, i) => (
+                <li key={sp.page} className="text-sm">
+                  <div className="flex items-baseline gap-2">
+                    <span className="text-xs font-bold text-gray-400 w-4">{i + 1}.</span>
+                    <a href={sp.page} target="_blank" rel="noopener"
+                      className="text-blue-600 hover:underline truncate flex-1" title={sp.page}>
+                      {shortenUrl(sp.page)}
+                    </a>
+                  </div>
+                  <p className="text-xs text-gray-500 ml-6">
+                    {fmt(sp.clicks)} clics · {fmt(sp.impressions)} impressions
+                  </p>
+                </li>
+              ))}
+              {data.source_pages.length === 0 && (
+                <li className="text-xs text-gray-400">Pas encore assez de données.</li>
+              )}
+            </ol>
+          </aside>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function Position4_15Card({ siteId }: { siteId: string }) {
   const [period, setPeriod] = useState(28);
   const [open, setOpen] = useState(true);
@@ -353,6 +515,10 @@ function Position4_15Card({ siteId }: { siteId: string }) {
 
 export default function QuickWinsPage({ params }: { params: { id: string } }) {
   const id = params.id;
+  const { data: website } = useQuery<{ domain?: string }>({
+    queryKey: ["website", id],
+    queryFn: async () => (await api.get(`/websites/${id}`)).data,
+  });
   useQuery<Catalog>({
     queryKey: ["qw-catalog", id],
     queryFn: async () => (await api.get(`/websites/${id}/quick-wins`)).data,
@@ -375,6 +541,7 @@ export default function QuickWinsPage({ params }: { params: { id: string } }) {
 
           <Position4_15Card siteId={id} />
           <LowCtrCard siteId={id} />
+          <Top3ConsolidateCard siteId={id} domain={website?.domain} />
         </main>
       </div>
     </div>

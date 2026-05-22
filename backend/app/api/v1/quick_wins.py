@@ -55,6 +55,22 @@ QUICK_WINS_CATALOG = [
             "Republier la page puis demander une nouvelle indexation dans Google Search Console.",
         ],
     },
+    {
+        "id": "top_3_consolidate",
+        "title": "Requêtes en position 1–3 à consolider",
+        "summary": (
+            "Vos meilleures positions sont des actifs précieux mais fragiles : un concurrent qui investit "
+            "peut vous reprendre la place. Renforcez ces pages avec des liens internes depuis vos pages "
+            "les plus visitées pour solidifier leur autorité."
+        ),
+        "recommendations": [
+            "Identifier les requêtes qui se positionnent déjà en position 1, 2 ou 3.",
+            "Repérer la page qui ressort pour chaque requête (colonne ci-dessous).",
+            "Ouvrir vos pages les plus visitées (panneau « Pages sources ») et y ajouter des liens internes vers ces pages cibles.",
+            "Utiliser comme ancre la requête ou une variation proche (sans sur-optimiser).",
+            "Pour vérifier les liens internes existants, lancez sur Google : site:votredomaine.com \"ancre attendue\".",
+        ],
+    },
 ]
 
 
@@ -268,6 +284,75 @@ async def evaluate_low_ctr_high_impressions(
     }
 
 
+async def evaluate_top_3_consolidate(
+    site: Website,
+    db: AsyncSession,
+    period: int = 28,
+    min_impressions: int = 30,
+    limit: int = 30,
+) -> Dict[str, Any]:
+    """QW #3: queries already in position 1-3 — internal-linking consolidation candidates.
+
+    Also returns the top 5 site pages by clicks, which are the best sources to add
+    internal links from.
+    """
+    gsc = await _gsc_for_site(site, db)
+    if not gsc:
+        return {"has_data": False, "reason": "GSC non configuré pour ce site", "items": [], "source_pages": []}
+
+    end = date.today()
+    start = end - timedelta(days=period - 1)
+
+    try:
+        pair_rows = gsc.get_query_page_pairs(str(start), str(end))
+    except Exception as e:
+        return {"has_data": False, "reason": str(e), "items": [], "source_pages": []}
+
+    # Keep (page, query) rows whose position is in [1, 3]
+    items: List[Dict[str, Any]] = []
+    for r in pair_rows:
+        if not r["page"] or not r["query"]:
+            continue
+        if r["impressions"] < min_impressions:
+            continue
+        if not (1.0 <= r["position"] <= 3.0):
+            continue
+        items.append({
+            "page": r["page"],
+            "query": r["query"],
+            "position": r["position"],
+            "impressions": r["impressions"],
+            "clicks": r["clicks"],
+            "ctr": r["ctr"],
+            "google_search_url": f"https://www.google.com/search?q={quote_plus(r['query'])}",
+        })
+
+    items.sort(key=lambda x: x["impressions"], reverse=True)
+    items = items[:limit]
+
+    # Top source pages by clicks
+    by_page: Dict[str, Dict[str, int]] = {}
+    for r in pair_rows:
+        if not r["page"]:
+            continue
+        bucket = by_page.setdefault(r["page"], {"clicks": 0, "impressions": 0})
+        bucket["clicks"] += r["clicks"]
+        bucket["impressions"] += r["impressions"]
+    source_pages = sorted(
+        [{"page": p, **m} for p, m in by_page.items() if m["clicks"] > 0],
+        key=lambda x: x["clicks"],
+        reverse=True,
+    )[:5]
+
+    return {
+        "has_data": True,
+        "period": period,
+        "items": items,
+        "total_candidates": len(items),
+        "source_pages": source_pages,
+    }
+
+
 # ── Routes ────────────────────────────────────────────────────────────────────
 
 @router.get("")
@@ -311,4 +396,20 @@ async def quick_win_low_ctr_high_impressions(
     site = await _verify_site(website_id, db, effective_owner_id)
     return await evaluate_low_ctr_high_impressions(
         site, db, period=period, min_impressions=min_impressions, max_ctr=max_ctr, limit=limit
+    )
+
+
+@router.get("/top-3-consolidate")
+async def quick_win_top_3_consolidate(
+    website_id: int,
+    period: int = Query(28, ge=7, le=365),
+    min_impressions: int = Query(30, ge=1),
+    limit: int = Query(30, ge=1, le=100),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    effective_owner_id: int = Depends(get_workspace_owner_id),
+):
+    site = await _verify_site(website_id, db, effective_owner_id)
+    return await evaluate_top_3_consolidate(
+        site, db, period=period, min_impressions=min_impressions, limit=limit
     )
