@@ -15,7 +15,7 @@ from app.db.session import get_db
 from app.deps import get_current_user, get_workspace_owner_id
 from app.models.user import User, UserAPICredential
 from app.models.website import Website
-from app.models.monitoring import SEOSnapshot, SitemapSnapshot, SitemapURL, HTTPCheck
+from app.models.monitoring import SEOSnapshot, SitemapSnapshot, SitemapURL, HTTPCheck, CoreWebVital
 from app.core.crypto import decrypt_credentials
 
 router = APIRouter(prefix="/websites/{website_id}/quick-wins", tags=["quick-wins"])
@@ -85,6 +85,22 @@ QUICK_WINS_CATALOG = [
             "Si non → la supprimer et mettre en place une redirection 301 vers la page la plus proche thématiquement.",
             "Mettre à jour le sitemap pour ne plus lister les pages supprimées.",
             "Demander la mise à jour de l'indexation dans Google Search Console.",
+        ],
+    },
+    {
+        "id": "mobile_vs_desktop_gap",
+        "title": "Pages avec un écart de position important entre Mobile et Desktop",
+        "summary": (
+            "Si une page se classe bien sur un appareil et mal sur l'autre, c'est presque toujours un "
+            "problème technique : performance mobile, indexation, ou rendu de la page. À corriger en "
+            "priorité car Google utilise principalement l'index mobile-first."
+        ),
+        "recommendations": [
+            "Pour chaque page avec un écart > 5 positions : identifier sur quel appareil la page est moins bien classée.",
+            "Si la position mobile est plus mauvaise → tester la page sur PageSpeed Insights (mobile). Vérifier le temps de chargement, la lisibilité sans zoom, les zones cliquables.",
+            "Corriger les problèmes techniques identifiés : LCP, CLS, INP, scripts bloquants, images non optimisées.",
+            "Si la position desktop est plus mauvaise → vérifier que la version desktop est bien indexée (URL inspection dans Google Search Console).",
+            "Republier puis demander l'indexation. Comparer les positions 2 semaines plus tard.",
         ],
     },
     {
@@ -307,6 +323,89 @@ async def evaluate_low_ctr_high_impressions(
         c["meta_description"] = snap.meta_description if snap else None
         q = c["top_query"]["query"].lower()
         c["query_in_title"] = bool(snap and snap.title and q in snap.title.lower())
+
+    return {
+        "has_data": True,
+        "period": period,
+        "items": candidates,
+        "total_candidates": len(candidates),
+    }
+
+
+async def evaluate_mobile_vs_desktop_gap(
+    site: Website,
+    db: AsyncSession,
+    period: int = 28,
+    min_position_gap: float = 5.0,
+    min_impressions: int = 30,
+    limit: int = 30,
+) -> Dict[str, Any]:
+    """QW #6: pages whose mobile vs desktop position differ significantly."""
+    gsc = await _gsc_for_site(site, db)
+    if not gsc:
+        return {"has_data": False, "reason": "GSC non configuré pour ce site", "items": []}
+
+    end = date.today()
+    start = end - timedelta(days=period - 1)
+
+    try:
+        rows = gsc.get_page_device_metrics(str(start), str(end))
+    except Exception as e:
+        return {"has_data": False, "reason": str(e), "items": []}
+
+    # Group by page → { MOBILE: {...}, DESKTOP: {...}, TABLET: {...} }
+    by_page: Dict[str, Dict[str, Any]] = {}
+    for r in rows:
+        if not r["page"]:
+            continue
+        by_page.setdefault(r["page"], {})[r["device"]] = r
+
+    candidates: List[Dict[str, Any]] = []
+    for page, devices in by_page.items():
+        m = devices.get("MOBILE")
+        d = devices.get("DESKTOP")
+        if not m or not d:
+            continue
+        if m["impressions"] < min_impressions and d["impressions"] < min_impressions:
+            continue
+        # gap > 0 → mobile is worse; gap < 0 → desktop is worse
+        gap = m["position"] - d["position"]
+        if abs(gap) < min_position_gap:
+            continue
+        candidates.append({
+            "page": page,
+            "mobile": m,
+            "desktop": d,
+            "gap": round(gap, 1),
+            "worse_on": "mobile" if gap > 0 else "desktop",
+            "total_impressions": m["impressions"] + d["impressions"],
+            "pagespeed_url_mobile": f"https://pagespeed.web.dev/analysis?url={quote_plus(page)}&form_factor=mobile",
+            "pagespeed_url_desktop": f"https://pagespeed.web.dev/analysis?url={quote_plus(page)}&form_factor=desktop",
+        })
+
+    candidates.sort(key=lambda x: (abs(x["gap"]), x["total_impressions"]), reverse=True)
+    candidates = candidates[:limit]
+
+    # Enrich with latest Core Web Vitals (one per strategy) for each candidate page
+    if candidates:
+        vital_rows = (await db.execute(
+            select(CoreWebVital)
+            .where(CoreWebVital.website_id == site.id, CoreWebVital.page_url.in_([c["page"] for c in candidates]))
+            .order_by(CoreWebVital.page_url, CoreWebVital.strategy, desc(CoreWebVital.recorded_at))
+        )).scalars().all()
+        vitals_map: Dict[str, Dict[str, CoreWebVital]] = {}
+        for v in vital_rows:
+            vitals_map.setdefault(v.page_url, {}).setdefault(v.strategy, v)
+        for c in candidates:
+            v_by_strategy = vitals_map.get(c["page"], {})
+            for strat in ("mobile", "desktop"):
+                v = v_by_strategy.get(strat)
+                c[f"vitals_{strat}"] = {
+                    "performance_score": v.performance_score if v else None,
+                    "lcp": float(v.lcp) if v and v.lcp is not None else None,
+                    "cls": float(v.cls) if v and v.cls is not None else None,
+                    "inp": float(v.inp) if v and v.inp is not None else None,
+                } if v else None
 
     return {
         "has_data": True,
@@ -594,6 +693,27 @@ async def quick_win_top_3_consolidate(
     site = await _verify_site(website_id, db, effective_owner_id)
     return await evaluate_top_3_consolidate(
         site, db, period=period, min_impressions=min_impressions, limit=limit
+    )
+
+
+@router.get("/mobile-vs-desktop-gap")
+async def quick_win_mobile_vs_desktop_gap(
+    website_id: int,
+    period: int = Query(28, ge=7, le=365),
+    min_position_gap: float = Query(5.0, ge=0, le=100),
+    min_impressions: int = Query(30, ge=1),
+    limit: int = Query(30, ge=1, le=100),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    effective_owner_id: int = Depends(get_workspace_owner_id),
+):
+    site = await _verify_site(website_id, db, effective_owner_id)
+    return await evaluate_mobile_vs_desktop_gap(
+        site, db,
+        period=period,
+        min_position_gap=min_position_gap,
+        min_impressions=min_impressions,
+        limit=limit,
     )
 
 

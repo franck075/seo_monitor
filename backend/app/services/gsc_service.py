@@ -211,6 +211,38 @@ class GSCService:
             for r in rows
         ]
 
+    def get_page_device_metrics(self, start_date: str, end_date: str, row_limit: int = 25000) -> List[Dict[str, Any]]:
+        """Per-page GSC metrics broken down by device (mobile/desktop/tablet)."""
+        results = []
+        start_row = 0
+        while True:
+            body = {
+                "startDate": start_date,
+                "endDate": end_date,
+                "dimensions": ["page", "device"],
+                "rowLimit": row_limit,
+                "startRow": start_row,
+                "dataState": "all",
+            }
+            response = self.service.searchanalytics().query(siteUrl=self.site_url, body=body).execute()
+            rows = response.get("rows", [])
+            if not rows:
+                break
+            for row in rows:
+                keys = row.get("keys", [])
+                results.append({
+                    "page": keys[0] if len(keys) > 0 else "",
+                    "device": (keys[1] if len(keys) > 1 else "").upper(),
+                    "clicks": int(row.get("clicks", 0)),
+                    "impressions": int(row.get("impressions", 0)),
+                    "ctr": round(float(row.get("ctr", 0.0)) * 100, 2),
+                    "position": round(float(row.get("position", 0.0)), 1),
+                })
+            if len(rows) < row_limit:
+                break
+            start_row += row_limit
+        return results
+
     def get_query_page_pairs(self, start_date: str, end_date: str, row_limit: int = 25000) -> List[Dict[str, Any]]:
         """Aggregated GSC metrics per (query, page) pair over a period.
 

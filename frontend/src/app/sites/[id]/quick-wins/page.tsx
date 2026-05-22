@@ -5,7 +5,7 @@ import Link from "next/link";
 import { api } from "@/lib/api";
 import { Sidebar } from "@/components/layout/Sidebar";
 import { TopNav } from "@/components/layout/TopNav";
-import { Sparkles, ExternalLink, Check, X, Search, ChevronDown, ChevronUp, Eye } from "lucide-react";
+import { Sparkles, ExternalLink, Check, X, Search, ChevronDown, ChevronUp, Eye, Smartphone, Monitor } from "lucide-react";
 
 type Catalog = {
   quick_wins: { id: string; title: string; summary: string; recommendations: string[] }[];
@@ -257,6 +257,182 @@ type Top3LowCtrResponse = {
   has_data: boolean; reason?: string; period?: number;
   items: Top3LowCtrItem[]; total_candidates?: number;
 };
+
+type DeviceMetrics = { clicks: number; impressions: number; ctr: number; position: number };
+type Vitals = { performance_score: number | null; lcp: number | null; cls: number | null; inp: number | null };
+type MobileDesktopItem = {
+  page: string;
+  mobile: DeviceMetrics;
+  desktop: DeviceMetrics;
+  gap: number;
+  worse_on: "mobile" | "desktop";
+  total_impressions: number;
+  pagespeed_url_mobile: string;
+  pagespeed_url_desktop: string;
+  vitals_mobile: Vitals | null;
+  vitals_desktop: Vitals | null;
+};
+type MobileDesktopResponse = {
+  has_data: boolean; reason?: string; period?: number;
+  items: MobileDesktopItem[]; total_candidates?: number;
+};
+
+function MobileVsDesktopCard({ siteId }: { siteId: string }) {
+  const [period, setPeriod] = useState(28);
+  const [open, setOpen] = useState(false);
+
+  const { data, isLoading } = useQuery<MobileDesktopResponse>({
+    queryKey: ["qw-mobile-vs-desktop", siteId, period],
+    queryFn: async () =>
+      (await api.get(`/websites/${siteId}/quick-wins/mobile-vs-desktop-gap?period=${period}`)).data,
+  });
+
+  return (
+    <div className="bg-white rounded-2xl border border-gray-200 overflow-hidden">
+      <div className="p-5 border-b border-gray-100">
+        <div className="flex items-start justify-between gap-4">
+          <div className="flex-1">
+            <div className="flex items-center gap-2 mb-2">
+              <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-blue-50 text-blue-700 rounded text-xs font-semibold">
+                <Sparkles className="w-3 h-3" /> Quick Win #6
+              </span>
+              {data?.has_data && data.total_candidates !== undefined && (
+                <span className="text-xs text-gray-500">
+                  {data.total_candidates} page{data.total_candidates > 1 ? "s" : ""} avec écart Mobile/Desktop
+                </span>
+              )}
+            </div>
+            <h3 className="text-lg font-bold text-gray-900">Pages avec un écart de position entre Mobile et Desktop</h3>
+            <p className="text-sm text-gray-500 mt-1">
+              Si une page se classe bien sur un appareil et mal sur l'autre, c'est presque toujours un
+              problème technique. Google utilise l'index mobile-first : à corriger en priorité.
+            </p>
+          </div>
+          <select value={period} onChange={(e) => setPeriod(Number(e.target.value))}
+            className="border border-gray-200 rounded-lg px-3 py-1.5 text-sm bg-white">
+            {PERIODS.map((p) => <option key={p.value} value={p.value}>{p.label}</option>)}
+          </select>
+        </div>
+
+        <button onClick={() => setOpen(!open)}
+          className="mt-3 inline-flex items-center gap-1 text-xs text-blue-600 hover:underline">
+          {open ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+          {open ? "Masquer" : "Afficher"} les recommandations
+        </button>
+
+        {open && (
+          <ol className="mt-3 space-y-1.5 text-sm text-gray-700 list-decimal list-inside pl-1">
+            <li>Identifiez sur quel appareil la page est moins bien classée (colonne « Écart »).</li>
+            <li><b>Si mobile plus mauvais</b> → cliquez sur <Smartphone className="w-3 h-3 inline" /> pour lancer PageSpeed Insights mobile. Vérifiez LCP, CLS, INP, lisibilité, zones cliquables.</li>
+            <li>Corrigez les problèmes techniques : LCP, scripts bloquants, images non optimisées.</li>
+            <li><b>Si desktop plus mauvais</b> → vérifiez l'indexation desktop (URL Inspection dans GSC).</li>
+            <li>Republiez, demandez l'indexation, comparez les positions 2 semaines plus tard.</li>
+          </ol>
+        )}
+      </div>
+
+      {isLoading && <div className="p-8 text-center text-gray-400">Chargement…</div>}
+
+      {!isLoading && data && !data.has_data && (
+        <div className="p-5 bg-amber-50 border-t border-amber-200 text-amber-800 text-sm">
+          <p className="font-semibold">Données GSC indisponibles</p>
+          <p>{data.reason || "Configurez Google Search Console pour ce site."}</p>
+        </div>
+      )}
+
+      {!isLoading && data?.has_data && data.items.length === 0 && (
+        <div className="p-8 text-center text-gray-500 text-sm">
+          🎉 Aucune page avec un écart Mobile/Desktop supérieur à 5 positions. Cohérence parfaite.
+        </div>
+      )}
+
+      {!isLoading && data?.has_data && data.items.length > 0 && (
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead className="bg-gray-50 text-xs text-gray-500 uppercase">
+              <tr>
+                <th className="text-left px-4 py-3 font-semibold">Page</th>
+                <th className="text-right px-3 py-3 font-semibold">
+                  <span className="inline-flex items-center gap-1"><Smartphone className="w-3 h-3" /> Mobile</span>
+                </th>
+                <th className="text-right px-3 py-3 font-semibold">
+                  <span className="inline-flex items-center gap-1"><Monitor className="w-3 h-3" /> Desktop</span>
+                </th>
+                <th className="text-right px-3 py-3 font-semibold">Écart</th>
+                <th className="text-left px-3 py-3 font-semibold">Score Lighthouse</th>
+                <th className="px-3 py-3"></th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-100">
+              {data.items.map((it) => (
+                <tr key={it.page} className="hover:bg-gray-50">
+                  <td className="px-4 py-3 max-w-xs">
+                    <a href={it.page} target="_blank" rel="noopener"
+                      className="text-blue-600 hover:underline inline-flex items-center gap-1 truncate"
+                      title={it.page}>
+                      <span className="truncate">{shortenUrl(it.page)}</span>
+                      <ExternalLink className="w-3 h-3 flex-shrink-0" />
+                    </a>
+                    <div className="text-xs text-gray-400 mt-0.5">
+                      {fmt(it.total_impressions)} impressions au total
+                    </div>
+                  </td>
+                  <td className="px-3 py-3 text-right tabular-nums">
+                    <span className={`font-semibold ${it.worse_on === "mobile" ? "text-red-600" : "text-gray-900"}`}>
+                      {it.mobile.position.toFixed(1)}
+                    </span>
+                    <div className="text-xs text-gray-400">{fmt(it.mobile.impressions)} imp.</div>
+                  </td>
+                  <td className="px-3 py-3 text-right tabular-nums">
+                    <span className={`font-semibold ${it.worse_on === "desktop" ? "text-red-600" : "text-gray-900"}`}>
+                      {it.desktop.position.toFixed(1)}
+                    </span>
+                    <div className="text-xs text-gray-400">{fmt(it.desktop.impressions)} imp.</div>
+                  </td>
+                  <td className="px-3 py-3 text-right tabular-nums">
+                    <span className="font-bold text-amber-600">{it.gap > 0 ? "+" : ""}{it.gap.toFixed(1)}</span>
+                    <div className="text-xs text-gray-500">{it.worse_on === "mobile" ? "Mobile" : "Desktop"} moins bien</div>
+                  </td>
+                  <td className="px-3 py-3">
+                    <div className="flex gap-2 text-xs">
+                      {it.vitals_mobile?.performance_score !== null && it.vitals_mobile?.performance_score !== undefined ? (
+                        <span title="Score Lighthouse Mobile">
+                          <Smartphone className="w-3 h-3 inline" /> {it.vitals_mobile.performance_score}
+                        </span>
+                      ) : <span className="text-gray-400">📱 —</span>}
+                      {it.vitals_desktop?.performance_score !== null && it.vitals_desktop?.performance_score !== undefined ? (
+                        <span title="Score Lighthouse Desktop">
+                          <Monitor className="w-3 h-3 inline" /> {it.vitals_desktop.performance_score}
+                        </span>
+                      ) : <span className="text-gray-400">🖥 —</span>}
+                    </div>
+                  </td>
+                  <td className="px-3 py-3 text-right">
+                    <div className="flex justify-end gap-1.5">
+                      <a href={it.worse_on === "mobile" ? it.pagespeed_url_mobile : it.pagespeed_url_desktop}
+                        target="_blank" rel="noopener"
+                        className="inline-flex items-center gap-1 px-2 py-1.5 text-xs border border-gray-200 rounded-md hover:bg-gray-50"
+                        title={`PageSpeed Insights — ${it.worse_on}`}>
+                        {it.worse_on === "mobile" ? <Smartphone className="w-3 h-3" /> : <Monitor className="w-3 h-3" />}
+                      </a>
+                      <Link
+                        href={`/sites/${siteId}/page-details?url=${encodeURIComponent(it.page)}&period=${period}`}
+                        className="inline-flex items-center gap-1 px-2 py-1.5 text-xs border border-gray-200 rounded-md hover:bg-gray-50"
+                        title="Voir les détails de la page"
+                      >
+                        <Eye className="w-3 h-3" />
+                      </Link>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
 
 function Top3LowCtrCard({ siteId }: { siteId: string }) {
   const [period, setPeriod] = useState(28);
@@ -841,6 +1017,7 @@ export default function QuickWinsPage({ params }: { params: { id: string } }) {
           <LowCtrCard siteId={id} />
           <Top3LowCtrCard siteId={id} />
           <Top3ConsolidateCard siteId={id} domain={website?.domain} />
+          <MobileVsDesktopCard siteId={id} />
           <ZeroTrafficCard siteId={id} />
         </main>
       </div>
