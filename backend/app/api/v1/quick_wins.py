@@ -39,6 +39,22 @@ QUICK_WINS_CATALOG = [
             "Republier la page puis demander une nouvelle indexation dans Google Search Console.",
         ],
     },
+    {
+        "id": "low_ctr_high_impressions",
+        "title": "Pages avec beaucoup d'impressions mais peu de clics",
+        "summary": (
+            "Vos pages apparaissent dans Google mais le titre n'attire pas les clics. "
+            "Réécrire le <title> peut augmenter le CTR sans changer une ligne de contenu — "
+            "et donc multiplier le trafic à positions équivalentes."
+        ),
+        "recommendations": [
+            "Identifier la requête principale qui amène des impressions sur chaque page.",
+            "Ouvrir la page et lire le <title> actuel.",
+            "Comparer avec les titres des 3 premiers résultats Google pour cette requête.",
+            "Réécrire le <title> avec : mot-clé principal en début + un chiffre, une date, ou un hook (ex : « 2026 », « guide complet », « en 5 minutes »).",
+            "Republier la page puis demander une nouvelle indexation dans Google Search Console.",
+        ],
+    },
 ]
 
 
@@ -168,6 +184,90 @@ async def evaluate_position_4_15(
     }
 
 
+async def evaluate_low_ctr_high_impressions(
+    site: Website,
+    db: AsyncSession,
+    period: int = 28,
+    min_impressions: int = 100,
+    max_ctr: float = 3.0,
+    limit: int = 20,
+) -> Dict[str, Any]:
+    """QW #2: pages with high impressions but low CTR — title rewrite candidates."""
+    gsc = await _gsc_for_site(site, db)
+    if not gsc:
+        return {"has_data": False, "reason": "GSC non configuré pour ce site", "items": []}
+
+    end = date.today()
+    start = end - timedelta(days=period - 1)
+
+    try:
+        rows = gsc.get_query_page_pairs(str(start), str(end))
+    except Exception as e:
+        return {"has_data": False, "reason": str(e), "items": []}
+
+    # Aggregate by page (weighted position)
+    by_page: Dict[str, Dict[str, Any]] = {}
+    for r in rows:
+        page = r["page"]
+        if not page:
+            continue
+        bucket = by_page.setdefault(page, {
+            "clicks": 0,
+            "impressions": 0,
+            "position_weighted_sum": 0.0,
+            "queries": [],
+        })
+        bucket["clicks"] += r["clicks"]
+        bucket["impressions"] += r["impressions"]
+        bucket["position_weighted_sum"] += r["position"] * max(r["impressions"], 1)
+        bucket["queries"].append(r)
+
+    candidates: List[Dict[str, Any]] = []
+    for page, b in by_page.items():
+        impressions = b["impressions"]
+        if impressions < min_impressions:
+            continue
+        ctr = b["clicks"] / impressions * 100 if impressions else 0
+        if ctr >= max_ctr:
+            continue
+        avg_pos = round(b["position_weighted_sum"] / impressions, 1) if impressions else 0
+        top_query = max(b["queries"], key=lambda q: q["impressions"])
+        candidates.append({
+            "page": page,
+            "position": avg_pos,
+            "impressions": impressions,
+            "clicks": b["clicks"],
+            "ctr": round(ctr, 2),
+            "top_query": {
+                "query": top_query["query"],
+                "impressions": top_query["impressions"],
+                "clicks": top_query["clicks"],
+                "position": top_query["position"],
+                "ctr": top_query["ctr"],
+            },
+            "google_search_url": f"https://www.google.com/search?q={quote_plus(top_query['query'])}",
+        })
+
+    candidates.sort(key=lambda x: x["impressions"], reverse=True)
+    candidates = candidates[:limit]
+
+    # Pull current titles from SEO snapshots so the user sees what to rewrite
+    snapshots = await _latest_snapshots_for_pages(db, site.id, [c["page"] for c in candidates])
+    for c in candidates:
+        snap = snapshots.get(c["page"])
+        c["title"] = snap.title if snap else None
+        c["meta_description"] = snap.meta_description if snap else None
+        q = c["top_query"]["query"].lower()
+        c["query_in_title"] = bool(snap and snap.title and q in snap.title.lower())
+
+    return {
+        "has_data": True,
+        "period": period,
+        "items": candidates,
+        "total_candidates": len(candidates),
+    }
+
+
 # ── Routes ────────────────────────────────────────────────────────────────────
 
 @router.get("")
@@ -195,3 +295,20 @@ async def quick_win_position_4_15(
 ):
     site = await _verify_site(website_id, db, effective_owner_id)
     return await evaluate_position_4_15(site, db, period=period, min_impressions=min_impressions, limit=limit)
+
+
+@router.get("/low-ctr-high-impressions")
+async def quick_win_low_ctr_high_impressions(
+    website_id: int,
+    period: int = Query(28, ge=7, le=365),
+    min_impressions: int = Query(100, ge=1),
+    max_ctr: float = Query(3.0, ge=0, le=100),
+    limit: int = Query(20, ge=1, le=100),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    effective_owner_id: int = Depends(get_workspace_owner_id),
+):
+    site = await _verify_site(website_id, db, effective_owner_id)
+    return await evaluate_low_ctr_high_impressions(
+        site, db, period=period, min_impressions=min_impressions, max_ctr=max_ctr, limit=limit
+    )

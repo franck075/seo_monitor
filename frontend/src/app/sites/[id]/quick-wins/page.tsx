@@ -59,6 +59,165 @@ function CheckBadge({ ok, label }: { ok: boolean; label: string }) {
   );
 }
 
+type LowCtrItem = {
+  page: string;
+  position: number;
+  impressions: number;
+  clicks: number;
+  ctr: number;
+  top_query: TopQuery & { ctr: number };
+  google_search_url: string;
+  title: string | null;
+  meta_description: string | null;
+  query_in_title: boolean;
+};
+type LowCtrResponse = {
+  has_data: boolean;
+  reason?: string;
+  period?: number;
+  items: LowCtrItem[];
+  total_candidates?: number;
+};
+
+function LowCtrCard({ siteId }: { siteId: string }) {
+  const [period, setPeriod] = useState(28);
+  const [open, setOpen] = useState(false);
+
+  const { data, isLoading } = useQuery<LowCtrResponse>({
+    queryKey: ["qw-low-ctr", siteId, period],
+    queryFn: async () =>
+      (await api.get(`/websites/${siteId}/quick-wins/low-ctr-high-impressions?period=${period}`)).data,
+  });
+
+  return (
+    <div className="bg-white rounded-2xl border border-gray-200 overflow-hidden">
+      <div className="p-5 border-b border-gray-100">
+        <div className="flex items-start justify-between gap-4">
+          <div className="flex-1">
+            <div className="flex items-center gap-2 mb-2">
+              <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-blue-50 text-blue-700 rounded text-xs font-semibold">
+                <Sparkles className="w-3 h-3" /> Quick Win #2
+              </span>
+              {data?.has_data && data.total_candidates !== undefined && (
+                <span className="text-xs text-gray-500">
+                  {data.total_candidates} page{data.total_candidates > 1 ? "s" : ""} concernée{data.total_candidates > 1 ? "s" : ""}
+                </span>
+              )}
+            </div>
+            <h3 className="text-lg font-bold text-gray-900">Pages avec beaucoup d'impressions mais peu de clics</h3>
+            <p className="text-sm text-gray-500 mt-1">
+              Ces pages apparaissent dans Google mais leur <code className="text-xs bg-gray-100 px-1 py-0.5 rounded">&lt;title&gt;</code> n'attire pas les clics.
+              Le réécrire peut multiplier le trafic à positions équivalentes — sans toucher au contenu.
+            </p>
+          </div>
+          <select value={period} onChange={(e) => setPeriod(Number(e.target.value))}
+            className="border border-gray-200 rounded-lg px-3 py-1.5 text-sm bg-white">
+            {PERIODS.map((p) => <option key={p.value} value={p.value}>{p.label}</option>)}
+          </select>
+        </div>
+
+        <button onClick={() => setOpen(!open)}
+          className="mt-3 inline-flex items-center gap-1 text-xs text-blue-600 hover:underline">
+          {open ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+          {open ? "Masquer" : "Afficher"} les recommandations
+        </button>
+
+        {open && (
+          <ol className="mt-3 space-y-1.5 text-sm text-gray-700 list-decimal list-inside pl-1">
+            <li>Identifiez la <b>requête principale</b> de chaque page (colonne ci-dessous).</li>
+            <li>Lisez le <code className="text-xs bg-gray-100 px-1 py-0.5 rounded">&lt;title&gt;</code> actuel (colonne « Title actuel »).</li>
+            <li>Cliquez sur <Search className="w-3 h-3 inline" /> pour comparer avec les titres des 3 premiers résultats Google.</li>
+            <li>Réécrivez le title : <b>mot-clé principal en début</b> + un chiffre, une date ou un hook (ex. « 2026 », « guide complet », « en 5 minutes »).</li>
+            <li>Republiez puis demandez l'indexation dans Google Search Console.</li>
+          </ol>
+        )}
+      </div>
+
+      {isLoading && <div className="p-8 text-center text-gray-400">Chargement…</div>}
+
+      {!isLoading && data && !data.has_data && (
+        <div className="p-5 bg-amber-50 border-t border-amber-200 text-amber-800 text-sm">
+          <p className="font-semibold">Données GSC indisponibles</p>
+          <p>{data.reason || "Configurez Google Search Console pour ce site."}</p>
+        </div>
+      )}
+
+      {!isLoading && data?.has_data && data.items.length === 0 && (
+        <div className="p-8 text-center text-gray-500 text-sm">
+          Aucune page avec un CTR &lt; 3% et plus de 100 impressions sur cette période. C'est plutôt bon signe !
+        </div>
+      )}
+
+      {!isLoading && data?.has_data && data.items.length > 0 && (
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead className="bg-gray-50 text-xs text-gray-500 uppercase">
+              <tr>
+                <th className="text-left px-4 py-3 font-semibold">Page</th>
+                <th className="text-left px-3 py-3 font-semibold">Requête principale</th>
+                <th className="text-left px-3 py-3 font-semibold">Title actuel</th>
+                <th className="text-right px-3 py-3 font-semibold">Impressions</th>
+                <th className="text-right px-3 py-3 font-semibold">CTR</th>
+                <th className="text-right px-3 py-3 font-semibold">Position</th>
+                <th className="px-3 py-3"></th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-100">
+              {data.items.map((it) => (
+                <tr key={it.page} className="hover:bg-gray-50">
+                  <td className="px-4 py-3 max-w-xs">
+                    <a href={it.page} target="_blank" rel="noopener"
+                      className="text-blue-600 hover:underline inline-flex items-center gap-1 truncate"
+                      title={it.page}>
+                      <span className="truncate">{shortenUrl(it.page)}</span>
+                      <ExternalLink className="w-3 h-3 flex-shrink-0" />
+                    </a>
+                  </td>
+                  <td className="px-3 py-3 max-w-xs">
+                    <div className="font-medium text-gray-900 truncate" title={it.top_query.query}>{it.top_query.query}</div>
+                    <div className="text-xs text-gray-400">{fmt(it.top_query.impressions)} impressions</div>
+                  </td>
+                  <td className="px-3 py-3 max-w-xs">
+                    <div className="text-xs text-gray-700 line-clamp-2" title={it.title || ""}>
+                      {it.title || <span className="text-gray-400 italic">Non collecté</span>}
+                    </div>
+                    {it.title && (
+                      <div className="mt-1">
+                        <CheckBadge ok={it.query_in_title} label="Requête dans title" />
+                      </div>
+                    )}
+                  </td>
+                  <td className="px-3 py-3 text-right tabular-nums">{fmt(it.impressions)}</td>
+                  <td className="px-3 py-3 text-right tabular-nums">
+                    <span className="font-semibold text-red-600">{it.ctr.toFixed(2)}%</span>
+                  </td>
+                  <td className="px-3 py-3 text-right tabular-nums">{it.position.toFixed(1)}</td>
+                  <td className="px-3 py-3 text-right">
+                    <div className="flex justify-end gap-1.5">
+                      <a href={it.google_search_url} target="_blank" rel="noopener"
+                        className="inline-flex items-center gap-1 px-2 py-1.5 text-xs border border-gray-200 rounded-md hover:bg-gray-50"
+                        title="Comparer avec les titres en SERP">
+                        <Search className="w-3 h-3" />
+                      </a>
+                      <Link
+                        href={`/sites/${siteId}/page-details?url=${encodeURIComponent(it.page)}&period=${period}`}
+                        className="inline-flex items-center gap-1 px-2 py-1.5 text-xs border border-gray-200 rounded-md hover:bg-gray-50"
+                        title="Voir les détails de la page"
+                      >
+                        <Eye className="w-3 h-3" />
+                      </Link>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function Position4_15Card({ siteId }: { siteId: string }) {
   const [period, setPeriod] = useState(28);
   const [open, setOpen] = useState(true);
@@ -215,6 +374,7 @@ export default function QuickWinsPage({ params }: { params: { id: string } }) {
           </div>
 
           <Position4_15Card siteId={id} />
+          <LowCtrCard siteId={id} />
         </main>
       </div>
     </div>
