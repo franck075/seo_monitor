@@ -87,6 +87,22 @@ QUICK_WINS_CATALOG = [
             "Demander la mise à jour de l'indexation dans Google Search Console.",
         ],
     },
+    {
+        "id": "top_3_low_ctr",
+        "title": "Requêtes Top 3 « presque cliquées » — problème de snippet",
+        "summary": (
+            "Vous êtes en position 1, 2 ou 3 mais les utilisateurs ne cliquent pas (CTR < 5%). "
+            "Le problème n'est pas votre position, c'est votre <title> ou votre meta description qui "
+            "ne donne pas envie de cliquer face aux concurrents."
+        ),
+        "recommendations": [
+            "Tapez la requête dans Google et regardez les snippets des concurrents qui passent devant vous.",
+            "Identifiez ce qui rend leur snippet plus cliquable : un chiffre, une promesse, un hook, une urgence.",
+            "Réécrivez votre <title> avec un hook fort en début (ex : « 2026 », « guide complet », « à partir de 5M CFA »).",
+            "Réécrivez la meta description pour matcher l'intention et inclure un appel à l'action.",
+            "Republiez, demandez l'indexation et comparez le CTR 2 semaines plus tard.",
+        ],
+    },
 ]
 
 
@@ -297,6 +313,65 @@ async def evaluate_low_ctr_high_impressions(
         "period": period,
         "items": candidates,
         "total_candidates": len(candidates),
+    }
+
+
+async def evaluate_top_3_low_ctr(
+    site: Website,
+    db: AsyncSession,
+    period: int = 28,
+    max_ctr: float = 5.0,
+    min_impressions: int = 50,
+    limit: int = 30,
+) -> Dict[str, Any]:
+    """QW #5: queries ranking position 1-3 but with surprisingly low CTR — snippet issue."""
+    gsc = await _gsc_for_site(site, db)
+    if not gsc:
+        return {"has_data": False, "reason": "GSC non configuré pour ce site", "items": []}
+
+    end = date.today()
+    start = end - timedelta(days=period - 1)
+
+    try:
+        rows = gsc.get_query_page_pairs(str(start), str(end))
+    except Exception as e:
+        return {"has_data": False, "reason": str(e), "items": []}
+
+    items: List[Dict[str, Any]] = []
+    for r in rows:
+        if not r["page"] or not r["query"]:
+            continue
+        if r["impressions"] < min_impressions:
+            continue
+        if not (1.0 <= r["position"] <= 3.0):
+            continue
+        if r["ctr"] >= max_ctr:
+            continue
+        items.append({
+            "page": r["page"],
+            "query": r["query"],
+            "position": r["position"],
+            "impressions": r["impressions"],
+            "clicks": r["clicks"],
+            "ctr": r["ctr"],
+            "google_search_url": f"https://www.google.com/search?q={quote_plus(r['query'])}",
+        })
+
+    items.sort(key=lambda x: x["impressions"], reverse=True)
+    items = items[:limit]
+
+    # Enrich with current title + meta description per page
+    snapshots = await _latest_snapshots_for_pages(db, site.id, [it["page"] for it in items])
+    for it in items:
+        s = snapshots.get(it["page"])
+        it["title"] = s.title if s else None
+        it["meta_description"] = s.meta_description if s else None
+
+    return {
+        "has_data": True,
+        "period": period,
+        "items": items,
+        "total_candidates": len(items),
     }
 
 
@@ -519,6 +594,23 @@ async def quick_win_top_3_consolidate(
     site = await _verify_site(website_id, db, effective_owner_id)
     return await evaluate_top_3_consolidate(
         site, db, period=period, min_impressions=min_impressions, limit=limit
+    )
+
+
+@router.get("/top-3-low-ctr")
+async def quick_win_top_3_low_ctr(
+    website_id: int,
+    period: int = Query(28, ge=7, le=365),
+    max_ctr: float = Query(5.0, ge=0, le=100),
+    min_impressions: int = Query(50, ge=1),
+    limit: int = Query(30, ge=1, le=100),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    effective_owner_id: int = Depends(get_workspace_owner_id),
+):
+    site = await _verify_site(website_id, db, effective_owner_id)
+    return await evaluate_top_3_low_ctr(
+        site, db, period=period, max_ctr=max_ctr, min_impressions=min_impressions, limit=limit
     )
 
 

@@ -246,6 +246,158 @@ type ZeroTrafficResponse = {
   sitemap_recorded_at?: string;
 };
 
+type Top3LowCtrItem = {
+  page: string; query: string; position: number;
+  impressions: number; clicks: number; ctr: number;
+  google_search_url: string;
+  title: string | null;
+  meta_description: string | null;
+};
+type Top3LowCtrResponse = {
+  has_data: boolean; reason?: string; period?: number;
+  items: Top3LowCtrItem[]; total_candidates?: number;
+};
+
+function Top3LowCtrCard({ siteId }: { siteId: string }) {
+  const [period, setPeriod] = useState(28);
+  const [open, setOpen] = useState(false);
+
+  const { data, isLoading } = useQuery<Top3LowCtrResponse>({
+    queryKey: ["qw-top-3-low-ctr", siteId, period],
+    queryFn: async () =>
+      (await api.get(`/websites/${siteId}/quick-wins/top-3-low-ctr?period=${period}`)).data,
+  });
+
+  return (
+    <div className="bg-white rounded-2xl border border-gray-200 overflow-hidden">
+      <div className="p-5 border-b border-gray-100">
+        <div className="flex items-start justify-between gap-4">
+          <div className="flex-1">
+            <div className="flex items-center gap-2 mb-2">
+              <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-blue-50 text-blue-700 rounded text-xs font-semibold">
+                <Sparkles className="w-3 h-3" /> Quick Win #5
+              </span>
+              {data?.has_data && data.total_candidates !== undefined && (
+                <span className="text-xs text-gray-500">
+                  {data.total_candidates} requête{data.total_candidates > 1 ? "s" : ""} en Top 3 sous-cliquée{data.total_candidates > 1 ? "s" : ""}
+                </span>
+              )}
+            </div>
+            <h3 className="text-lg font-bold text-gray-900">Requêtes Top 3 « presque cliquées » — problème de snippet</h3>
+            <p className="text-sm text-gray-500 mt-1">
+              Vous êtes en position 1, 2 ou 3 mais le CTR est inférieur à 5%. Ce n'est pas votre position,
+              c'est votre <code className="text-xs bg-gray-100 px-1 py-0.5 rounded">&lt;title&gt;</code> ou
+              votre meta description qui n'attire pas le clic.
+            </p>
+          </div>
+          <select value={period} onChange={(e) => setPeriod(Number(e.target.value))}
+            className="border border-gray-200 rounded-lg px-3 py-1.5 text-sm bg-white">
+            {PERIODS.map((p) => <option key={p.value} value={p.value}>{p.label}</option>)}
+          </select>
+        </div>
+
+        <button onClick={() => setOpen(!open)}
+          className="mt-3 inline-flex items-center gap-1 text-xs text-blue-600 hover:underline">
+          {open ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+          {open ? "Masquer" : "Afficher"} les recommandations
+        </button>
+
+        {open && (
+          <ol className="mt-3 space-y-1.5 text-sm text-gray-700 list-decimal list-inside pl-1">
+            <li>Cliquez sur <Search className="w-3 h-3 inline" /> pour voir la SERP Google : regardez les snippets des concurrents qui passent devant vous.</li>
+            <li>Identifiez ce qui rend leur snippet plus cliquable : un <b>chiffre</b>, une <b>promesse</b>, un <b>hook</b>, une <b>urgence</b>.</li>
+            <li>Réécrivez votre <code className="text-xs bg-gray-100 px-1 py-0.5 rounded">&lt;title&gt;</code> avec un hook fort en début (ex : « 2026 », « guide complet », « à partir de 5M CFA »).</li>
+            <li>Réécrivez la meta description en intégrant l'intention de recherche + un appel à l'action.</li>
+            <li>Republiez, demandez l'indexation dans GSC, et comparez le CTR <b>2 semaines plus tard</b>.</li>
+          </ol>
+        )}
+      </div>
+
+      {isLoading && <div className="p-8 text-center text-gray-400">Chargement…</div>}
+
+      {!isLoading && data && !data.has_data && (
+        <div className="p-5 bg-amber-50 border-t border-amber-200 text-amber-800 text-sm">
+          <p className="font-semibold">Données GSC indisponibles</p>
+          <p>{data.reason || "Configurez Google Search Console pour ce site."}</p>
+        </div>
+      )}
+
+      {!isLoading && data?.has_data && data.items.length === 0 && (
+        <div className="p-8 text-center text-gray-500 text-sm">
+          🎉 Aucune requête en Top 3 avec un CTR inférieur à 5%. Vos snippets fonctionnent.
+        </div>
+      )}
+
+      {!isLoading && data?.has_data && data.items.length > 0 && (
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead className="bg-gray-50 text-xs text-gray-500 uppercase">
+              <tr>
+                <th className="text-left px-4 py-3 font-semibold">Requête</th>
+                <th className="text-left px-3 py-3 font-semibold">Page · Snippet actuel</th>
+                <th className="text-right px-3 py-3 font-semibold">Position</th>
+                <th className="text-right px-3 py-3 font-semibold">Impr.</th>
+                <th className="text-right px-3 py-3 font-semibold">Clics</th>
+                <th className="text-right px-3 py-3 font-semibold">CTR</th>
+                <th className="px-3 py-3"></th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-100">
+              {data.items.map((it, i) => (
+                <tr key={`${it.page}-${it.query}-${i}`} className="hover:bg-gray-50">
+                  <td className="px-4 py-3 max-w-xs">
+                    <div className="font-medium text-gray-900 truncate" title={it.query}>{it.query}</div>
+                  </td>
+                  <td className="px-3 py-3 max-w-md">
+                    <a href={it.page} target="_blank" rel="noopener"
+                      className="text-blue-600 hover:underline text-xs inline-flex items-center gap-1 truncate"
+                      title={it.page}>
+                      <span className="truncate">{shortenUrl(it.page)}</span>
+                      <ExternalLink className="w-3 h-3 flex-shrink-0" />
+                    </a>
+                    {it.title && (
+                      <div className="text-xs text-gray-700 mt-1 line-clamp-1" title={it.title}>
+                        <span className="font-medium">Title:</span> {it.title}
+                      </div>
+                    )}
+                    {it.meta_description && (
+                      <div className="text-xs text-gray-500 line-clamp-1" title={it.meta_description}>
+                        <span className="font-medium">Meta:</span> {it.meta_description}
+                      </div>
+                    )}
+                  </td>
+                  <td className="px-3 py-3 text-right tabular-nums font-semibold text-green-600">{it.position.toFixed(1)}</td>
+                  <td className="px-3 py-3 text-right tabular-nums">{fmt(it.impressions)}</td>
+                  <td className="px-3 py-3 text-right tabular-nums">{fmt(it.clicks)}</td>
+                  <td className="px-3 py-3 text-right tabular-nums">
+                    <span className="font-semibold text-red-600">{it.ctr.toFixed(2)}%</span>
+                  </td>
+                  <td className="px-3 py-3 text-right">
+                    <div className="flex justify-end gap-1.5">
+                      <a href={it.google_search_url} target="_blank" rel="noopener"
+                        className="inline-flex items-center gap-1 px-2 py-1.5 text-xs border border-gray-200 rounded-md hover:bg-gray-50"
+                        title="Voir la SERP Google pour comparer les snippets">
+                        <Search className="w-3 h-3" />
+                      </a>
+                      <Link
+                        href={`/sites/${siteId}/page-details?url=${encodeURIComponent(it.page)}&period=${period}`}
+                        className="inline-flex items-center gap-1 px-2 py-1.5 text-xs border border-gray-200 rounded-md hover:bg-gray-50"
+                        title="Voir les détails de la page"
+                      >
+                        <Eye className="w-3 h-3" />
+                      </Link>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function ZeroTrafficCard({ siteId }: { siteId: string }) {
   const [period, setPeriod] = useState(90);
   const [open, setOpen] = useState(false);
@@ -687,6 +839,7 @@ export default function QuickWinsPage({ params }: { params: { id: string } }) {
 
           <Position4_15Card siteId={id} />
           <LowCtrCard siteId={id} />
+          <Top3LowCtrCard siteId={id} />
           <Top3ConsolidateCard siteId={id} domain={website?.domain} />
           <ZeroTrafficCard siteId={id} />
         </main>
