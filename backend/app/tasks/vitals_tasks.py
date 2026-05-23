@@ -1,3 +1,4 @@
+import logging
 from datetime import datetime, timezone
 from sqlalchemy import select
 from app.tasks.celery_app import celery_app
@@ -6,6 +7,8 @@ from app.models.website import Website
 from app.core.url_utils import domain_to_url
 from app.models.monitoring import CoreWebVital, MonitoredPage
 import asyncio
+
+logger = logging.getLogger(__name__)
 
 
 async def _pull_vitals_for_site(website_id: int):
@@ -51,7 +54,7 @@ async def _pull_vitals_for_site(website_id: int):
                     ))
                     await asyncio.sleep(3)
                 except Exception:
-                    pass
+                    logger.exception("PageSpeed scan failed for %s (%s)", url, strategy)
 
         await db.commit()
 
@@ -89,9 +92,10 @@ async def _scan_single_url(website_id: int, url: str):
                     inp_rating=data.get("inp_rating"),
                     ttfb_rating=data.get("ttfb_rating"),
                 ))
+                logger.info("PageSpeed scan OK for %s (%s) — score=%s", url, strategy, data.get("performance_score"))
                 await asyncio.sleep(2)
             except Exception:
-                pass
+                logger.exception("PageSpeed scan failed for %s (%s)", url, strategy)
         await db.commit()
 
 

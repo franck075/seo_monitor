@@ -25,6 +25,11 @@ class PageSpeedService:
     BASE_URL = "https://www.googleapis.com/pagespeedonline/v5/runPagespeed"
 
     async def get_vitals(self, url: str, strategy: str = "mobile") -> Dict[str, Any]:
+        if not settings.PAGESPEED_API_KEY:
+            raise RuntimeError(
+                "PAGESPEED_API_KEY n'est pas configurée. Ajoutez-la dans backend/.env.prod "
+                "(obtenez une clé sur https://developers.google.com/speed/docs/insights/v5/get-started)."
+            )
         params = {"url": url, "strategy": strategy, "key": settings.PAGESPEED_API_KEY}
         async with httpx.AsyncClient(timeout=60) as client:
             resp = await client.get(self.BASE_URL, params=params)
