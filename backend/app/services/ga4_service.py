@@ -96,6 +96,94 @@ class GA4Service:
             "avg_session_duration": float(row.metric_values[5].value),
         }
 
+    def get_page_engagement_range(self, start: str, end: str, limit: int = 500) -> List[Dict[str, Any]]:
+        """Per-page engagement metrics over a date range (all channels).
+
+        Returns sessions, views, users, engagement rate, engaged sessions,
+        avg engagement time, bounce rate, pages/session per landing page.
+        """
+        request = RunReportRequest(
+            property=f"properties/{self.property_id}",
+            date_ranges=[DateRange(start_date=start, end_date=end)],
+            dimensions=[Dimension(name="landingPage")],
+            metrics=[
+                Metric(name="sessions"),
+                Metric(name="screenPageViews"),
+                Metric(name="totalUsers"),
+                Metric(name="engagementRate"),
+                Metric(name="engagedSessions"),
+                Metric(name="userEngagementDuration"),
+                Metric(name="bounceRate"),
+                Metric(name="screenPageViewsPerSession"),
+            ],
+            limit=limit,
+            order_bys=[{"metric": {"metric_name": "sessions"}, "desc": True}],
+        )
+        response = self.client.run_report(request)
+        results = []
+        for row in response.rows:
+            sessions = int(row.metric_values[0].value)
+            eng_duration = float(row.metric_values[5].value)
+            results.append({
+                "page": row.dimension_values[0].value,
+                "sessions": sessions,
+                "pageviews": int(row.metric_values[1].value),
+                "users": int(row.metric_values[2].value),
+                "engagement_rate": round(float(row.metric_values[3].value) * 100, 1),
+                "engaged_sessions": int(row.metric_values[4].value),
+                "avg_engagement_time": round(eng_duration / sessions, 1) if sessions else 0,
+                "bounce_rate": round(float(row.metric_values[6].value) * 100, 1),
+                "pages_per_session": round(float(row.metric_values[7].value), 1),
+            })
+        return results
+
+    def get_channel_breakdown_range(self, start: str, end: str) -> List[Dict[str, Any]]:
+        """Per-channel sessions/users/engagement over a date range (all channels)."""
+        request = RunReportRequest(
+            property=f"properties/{self.property_id}",
+            date_ranges=[DateRange(start_date=start, end_date=end)],
+            dimensions=[Dimension(name="sessionDefaultChannelGroup")],
+            metrics=[
+                Metric(name="sessions"),
+                Metric(name="totalUsers"),
+                Metric(name="bounceRate"),
+                Metric(name="engagementRate"),
+                Metric(name="screenPageViewsPerSession"),
+            ],
+            order_bys=[{"metric": {"metric_name": "sessions"}, "desc": True}],
+        )
+        response = self.client.run_report(request)
+        results = []
+        for row in response.rows:
+            results.append({
+                "channel": row.dimension_values[0].value,
+                "sessions": int(row.metric_values[0].value),
+                "users": int(row.metric_values[1].value),
+                "bounce_rate": round(float(row.metric_values[2].value) * 100, 1),
+                "engagement_rate": round(float(row.metric_values[3].value) * 100, 1),
+                "pages_per_session": round(float(row.metric_values[4].value), 1),
+            })
+        return results
+
+    def get_channel_by_date(self, start: str, end: str) -> List[Dict[str, Any]]:
+        """Daily sessions per channel — for the stacked time-series chart."""
+        request = RunReportRequest(
+            property=f"properties/{self.property_id}",
+            date_ranges=[DateRange(start_date=start, end_date=end)],
+            dimensions=[Dimension(name="date"), Dimension(name="sessionDefaultChannelGroup")],
+            metrics=[Metric(name="sessions")],
+            limit=100000,
+        )
+        response = self.client.run_report(request)
+        results = []
+        for row in response.rows:
+            results.append({
+                "date": self._fmt_date(row.dimension_values[0].value),
+                "channel": row.dimension_values[1].value,
+                "sessions": int(row.metric_values[0].value),
+            })
+        return results
+
     @staticmethod
     def _fmt_date(raw: str) -> str:
         """Convert GA4 date format YYYYMMDD → YYYY-MM-DD."""

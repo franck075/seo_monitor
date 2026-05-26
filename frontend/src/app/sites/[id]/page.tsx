@@ -52,6 +52,7 @@ export default function WebsiteDetailPage({ params }: { params: { id: string } }
     { href: `/sites/${id}/top-pages`, label: "Top pages", icon: FileStack },
     { href: `/sites/${id}/mots-cles`, label: "Mots-clés", icon: BarChart2 },
     { href: `/sites/${id}/trafic`, label: "Trafic", icon: Activity },
+    { href: `/sites/${id}/comportement`, label: "Comportement", icon: Activity },
     { href: `/sites/${id}/performance`, label: "Core Web Vitals", icon: Globe },
     { href: `/sites/${id}/changements-seo`, label: "Changements SEO", icon: FileText },
     { href: `/sites/${id}/surveillance-http`, label: "Statuts HTTP", icon: Shield },
