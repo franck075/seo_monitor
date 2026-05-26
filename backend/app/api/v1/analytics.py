@@ -154,3 +154,115 @@ async def analytics_overview(
         "kpis": kpis,
         "monthly": monthly,
     }
+
+
+# ISO-3166 alpha-3 → French country name (only the codes GSC commonly returns;
+# unknown codes fall back to the raw code).
+COUNTRY_FR = {
+    "FRA": "France", "BEL": "Belgique", "CAN": "Canada", "MAR": "Maroc",
+    "REU": "La Réunion", "DZA": "Algérie", "MDG": "Madagascar", "BEN": "Bénin",
+    "ESP": "Espagne", "CHE": "Suisse", "USA": "États-Unis", "GBR": "Royaume-Uni",
+    "DEU": "Allemagne", "ITA": "Italie", "PRT": "Portugal", "NLD": "Pays-Bas",
+    "CIV": "Côte d'Ivoire", "SEN": "Sénégal", "CMR": "Cameroun", "TUN": "Tunisie",
+    "TGO": "Togo", "GAB": "Gabon", "COD": "RD Congo", "COG": "Congo",
+    "BFA": "Burkina Faso", "MLI": "Mali", "NER": "Niger", "GIN": "Guinée",
+    "LUX": "Luxembourg", "BRA": "Brésil", "IND": "Inde", "CHN": "Chine",
+}
+
+WEEKDAYS_FR = ["Lundi", "Mardi", "Mercredi", "Jeudi", "Vendredi", "Samedi", "Dimanche"]
+DEVICE_FR = {"DESKTOP": "Desktop", "MOBILE": "Mobile", "TABLET": "Tablet"}
+
+
+@router.get("/breakdown")
+async def analytics_breakdown(
+    website_id: int,
+    period: int = Query(90, ge=7, le=365),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    effective_owner_id: int = Depends(get_workspace_owner_id),
+):
+    """Clicks by weekday, top countries (with change), and device split + evolution."""
+    site = await _verify_site(website_id, db, effective_owner_id)
+    gsc = await _gsc_for_site(site, db)
+    if not gsc:
+        return {"has_data": False, "reason": "GSC non configuré pour ce site"}
+
+    curr_end = date.today()
+    curr_start = curr_end - timedelta(days=period - 1)
+    prev_end = curr_start - timedelta(days=1)
+    prev_start = prev_end - timedelta(days=period - 1)
+
+    try:
+        daily = gsc.get_totals_by_date(str(curr_start), str(curr_end))
+        countries_curr = gsc.get_totals_by_country(str(curr_start), str(curr_end))
+        countries_prev = gsc.get_totals_by_country(str(prev_start), str(prev_end))
+        device_daily = gsc.get_device_metrics_by_date(str(curr_start), str(curr_end))
+    except Exception as e:
+        return {"has_data": False, "reason": str(e)}
+
+    # ── Weekday ──
+    weekday_clicks = [0] * 7
+    weekday_days = [0] * 7
+    for d in daily:
+        try:
+            y, m, dd = (int(x) for x in d["date"].split("-"))
+            wd = date(y, m, dd).weekday()
+        except Exception:
+            continue
+        weekday_clicks[wd] += d["clicks"]
+        weekday_days[wd] += 1
+    weekday = []
+    for i in range(7):
+        avg = round(weekday_clicks[i] / weekday_days[i]) if weekday_days[i] else 0
+        weekday.append({"day": WEEKDAYS_FR[i], "clicks": weekday_clicks[i], "avg_clicks": avg})
+    best_day = max(weekday, key=lambda x: x["avg_clicks"]) if weekday else None
+
+    # ── Countries (top 10, current vs previous) ──
+    prev_by_country = {c["country"]: c for c in countries_prev}
+    countries = []
+    for c in sorted(countries_curr, key=lambda x: x["clicks"], reverse=True)[:10]:
+        prev_clicks = prev_by_country.get(c["country"], {}).get("clicks", 0)
+        countries.append({
+            "country": c["country"],
+            "country_label": COUNTRY_FR.get(c["country"], c["country"]),
+            "clicks": c["clicks"],
+            "impressions": c["impressions"],
+            "change_pct": _pct(c["clicks"], prev_clicks),
+        })
+    max_country_clicks = max((c["clicks"] for c in countries), default=0)
+    for c in countries:
+        c["bar_pct"] = round(c["clicks"] / max_country_clicks * 100) if max_country_clicks else 0
+
+    # ── Devices (totals + daily evolution) ──
+    device_totals: Dict[str, int] = {"DESKTOP": 0, "MOBILE": 0, "TABLET": 0}
+    evolution_map: Dict[str, Dict[str, int]] = {}
+    for r in device_daily:
+        dev = r["device"]
+        if dev in device_totals:
+            device_totals[dev] += r["clicks"]
+        bucket = evolution_map.setdefault(r["date"], {"DESKTOP": 0, "MOBILE": 0, "TABLET": 0})
+        if dev in bucket:
+            bucket[dev] += r["clicks"]
+    devices = [
+        {"device": DEVICE_FR[k], "key": k.lower(), "clicks": v}
+        for k, v in device_totals.items()
+    ]
+    device_evolution = [
+        {
+            "date": dt,
+            "desktop": evolution_map[dt]["DESKTOP"],
+            "mobile": evolution_map[dt]["MOBILE"],
+            "tablet": evolution_map[dt]["TABLET"],
+        }
+        for dt in sorted(evolution_map.keys())
+    ]
+
+    return {
+        "has_data": True,
+        "period": period,
+        "weekday": weekday,
+        "best_day": best_day,
+        "countries": countries,
+        "devices": devices,
+        "device_evolution": device_evolution,
+    }

@@ -308,6 +308,56 @@ class GSCService:
             start_row += row_limit
         return results
 
+    def get_totals_by_country(self, start_date: str, end_date: str, row_limit: int = 250) -> List[Dict[str, Any]]:
+        """Totals per country over a period (GSC country dimension, ISO-3 codes)."""
+        body = {
+            "startDate": start_date,
+            "endDate": end_date,
+            "dimensions": ["country"],
+            "rowLimit": row_limit,
+            "dataState": "all",
+        }
+        response = self.service.searchanalytics().query(siteUrl=self.site_url, body=body).execute()
+        rows = response.get("rows", [])
+        return [
+            {
+                "country": (r.get("keys") or [""])[0].upper(),
+                "clicks": int(r.get("clicks", 0)),
+                "impressions": int(r.get("impressions", 0)),
+            }
+            for r in rows
+        ]
+
+    def get_device_metrics_by_date(self, start_date: str, end_date: str, row_limit: int = 25000) -> List[Dict[str, Any]]:
+        """Daily totals broken down by device — for the device split + evolution."""
+        results = []
+        start_row = 0
+        while True:
+            body = {
+                "startDate": start_date,
+                "endDate": end_date,
+                "dimensions": ["date", "device"],
+                "rowLimit": row_limit,
+                "startRow": start_row,
+                "dataState": "all",
+            }
+            response = self.service.searchanalytics().query(siteUrl=self.site_url, body=body).execute()
+            rows = response.get("rows", [])
+            if not rows:
+                break
+            for row in rows:
+                keys = row.get("keys", [])
+                results.append({
+                    "date": keys[0] if len(keys) > 0 else "",
+                    "device": (keys[1] if len(keys) > 1 else "").upper(),
+                    "clicks": int(row.get("clicks", 0)),
+                    "impressions": int(row.get("impressions", 0)),
+                })
+            if len(rows) < row_limit:
+                break
+            start_row += row_limit
+        return results
+
     def get_site_performance(self, days: int = 1) -> Dict[str, Any]:
         end_date = datetime.now().strftime("%Y-%m-%d")
         start_date = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")

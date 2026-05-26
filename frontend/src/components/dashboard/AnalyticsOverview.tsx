@@ -6,6 +6,7 @@ import {
 } from "recharts";
 import { api } from "@/lib/api";
 import { ArrowUp, ArrowDown, KeyRound, Search, FileText, Globe } from "lucide-react";
+import { AnalyticsBreakdown } from "./AnalyticsBreakdown";
 
 type Kpi = { current: number; previous: number; change_pct: number | null };
 type MonthlyPoint = {
@@ -191,6 +192,8 @@ export function AnalyticsOverview({ sites }: { sites: Site[] }) {
               </ResponsiveContainer>
             </div>
           )}
+
+          <AnalyticsBreakdown siteId={siteId} />
         </>
       )}
     </div>
