@@ -24,4 +24,4 @@ api_router.include_router(team.router)
 api_router.include_router(pages.router)
 api_router.include_router(quick_wins.router)
 api_router.include_router(analytics.router)
-api_router.include_router(public_router)
+api_router.include_router(public_router)  # noqa: keep last

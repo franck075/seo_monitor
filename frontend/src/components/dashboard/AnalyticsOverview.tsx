@@ -8,6 +8,7 @@ import { api } from "@/lib/api";
 import { ArrowUp, ArrowDown, KeyRound, Search, FileText, Globe } from "lucide-react";
 import { AnalyticsBreakdown } from "./AnalyticsBreakdown";
 import { AnalyticsBranded } from "./AnalyticsBranded";
+import { AnalyticsClusters } from "./AnalyticsClusters";
 
 type Kpi = { current: number; previous: number; change_pct: number | null };
 type MonthlyPoint = {
@@ -196,6 +197,7 @@ export function AnalyticsOverview({ sites }: { sites: Site[] }) {
 
           <AnalyticsBreakdown siteId={siteId} />
           <AnalyticsBranded siteId={siteId} />
+          <AnalyticsClusters siteId={siteId} />
         </>
       )}
     </div>

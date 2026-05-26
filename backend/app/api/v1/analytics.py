@@ -7,10 +7,13 @@ from fastapi import APIRouter, Depends, Query, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
+from pydantic import BaseModel
+
 from app.db.session import get_db
 from app.deps import get_current_user, get_workspace_owner_id
 from app.models.user import User, UserAPICredential
 from app.models.website import Website
+from app.models.keyword import KeywordCluster
 from app.core.crypto import decrypt_credentials
 
 router = APIRouter(prefix="/websites/{website_id}/analytics", tags=["analytics"])
@@ -372,4 +375,202 @@ async def analytics_branded(
         "branded": finalize(branded),
         "non_branded": finalize(non_branded),
         "evolution": evolution,
+    }
+
+
+# ── Keyword clusters (rule-based) ─────────────────────────────────────────────
+
+class ClusterIn(BaseModel):
+    name: str
+    color: str = "#3b82f6"
+    terms: List[str] = []
+    is_brand: bool = False
+    position: int = 0
+
+
+def _cluster_out(c: KeywordCluster) -> Dict[str, Any]:
+    return {
+        "id": c.id,
+        "name": c.name,
+        "color": c.color,
+        "terms": c.terms or [],
+        "is_brand": c.is_brand,
+        "position": c.position,
+    }
+
+
+@router.get("/clusters/definitions")
+async def list_clusters(
+    website_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    effective_owner_id: int = Depends(get_workspace_owner_id),
+):
+    await _verify_site(website_id, db, effective_owner_id)
+    rows = (await db.execute(
+        select(KeywordCluster)
+        .where(KeywordCluster.website_id == website_id)
+        .order_by(KeywordCluster.position, KeywordCluster.id)
+    )).scalars().all()
+    return {"clusters": [_cluster_out(c) for c in rows]}
+
+
+@router.post("/clusters/definitions")
+async def create_cluster(
+    website_id: int,
+    payload: ClusterIn,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    effective_owner_id: int = Depends(get_workspace_owner_id),
+):
+    await _verify_site(website_id, db, effective_owner_id)
+    cluster = KeywordCluster(
+        website_id=website_id,
+        name=payload.name,
+        color=payload.color,
+        terms=[t.strip().lower() for t in payload.terms if t.strip()],
+        is_brand=payload.is_brand,
+        position=payload.position,
+    )
+    db.add(cluster)
+    await db.commit()
+    await db.refresh(cluster)
+    return _cluster_out(cluster)
+
+
+@router.put("/clusters/definitions/{cluster_id}")
+async def update_cluster(
+    website_id: int,
+    cluster_id: int,
+    payload: ClusterIn,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    effective_owner_id: int = Depends(get_workspace_owner_id),
+):
+    await _verify_site(website_id, db, effective_owner_id)
+    cluster = (await db.execute(
+        select(KeywordCluster).where(
+            KeywordCluster.id == cluster_id, KeywordCluster.website_id == website_id
+        )
+    )).scalar_one_or_none()
+    if not cluster:
+        raise HTTPException(status_code=404, detail="Cluster introuvable")
+    cluster.name = payload.name
+    cluster.color = payload.color
+    cluster.terms = [t.strip().lower() for t in payload.terms if t.strip()]
+    cluster.is_brand = payload.is_brand
+    cluster.position = payload.position
+    await db.commit()
+    await db.refresh(cluster)
+    return _cluster_out(cluster)
+
+
+@router.delete("/clusters/definitions/{cluster_id}")
+async def delete_cluster(
+    website_id: int,
+    cluster_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    effective_owner_id: int = Depends(get_workspace_owner_id),
+):
+    await _verify_site(website_id, db, effective_owner_id)
+    cluster = (await db.execute(
+        select(KeywordCluster).where(
+            KeywordCluster.id == cluster_id, KeywordCluster.website_id == website_id
+        )
+    )).scalar_one_or_none()
+    if not cluster:
+        raise HTTPException(status_code=404, detail="Cluster introuvable")
+    await db.delete(cluster)
+    await db.commit()
+    return {"deleted": True}
+
+
+@router.get("/clusters")
+async def analytics_clusters(
+    website_id: int,
+    period: int = Query(28, ge=7, le=365),
+    uncategorized_limit: int = Query(100, ge=1, le=1000),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    effective_owner_id: int = Depends(get_workspace_owner_id),
+):
+    """Aggregate GSC queries into the site's rule-based clusters (current vs previous)."""
+    site = await _verify_site(website_id, db, effective_owner_id)
+
+    clusters = (await db.execute(
+        select(KeywordCluster)
+        .where(KeywordCluster.website_id == website_id)
+        .order_by(KeywordCluster.position, KeywordCluster.id)
+    )).scalars().all()
+
+    gsc = await _gsc_for_site(site, db)
+    if not gsc:
+        return {"has_data": False, "reason": "GSC non configuré pour ce site", "clusters": []}
+
+    curr_end = date.today()
+    curr_start = curr_end - timedelta(days=period - 1)
+    prev_end = curr_start - timedelta(days=1)
+    prev_start = prev_end - timedelta(days=period - 1)
+
+    try:
+        curr_q = gsc.get_top_queries_for_period(str(curr_start), str(curr_end))
+        prev_q = gsc.get_top_queries_for_period(str(prev_start), str(prev_end))
+    except Exception as e:
+        return {"has_data": False, "reason": str(e), "clusters": []}
+
+    # Pre-lowercase cluster terms
+    cluster_terms = [(c, [t.lower() for t in (c.terms or [])]) for c in clusters]
+
+    def classify(query: str) -> Optional[int]:
+        q = query.lower()
+        for c, terms in cluster_terms:
+            if any(t in q for t in terms):
+                return c.id
+        return None
+
+    def aggregate(queries):
+        agg: Dict[Optional[int], Dict[str, int]] = {}
+        for q in queries:
+            cid = classify(q["query"])
+            bucket = agg.setdefault(cid, {"clicks": 0, "impressions": 0, "keywords": 0})
+            bucket["clicks"] += q["clicks"]
+            bucket["impressions"] += q["impressions"]
+            bucket["keywords"] += 1
+        return agg
+
+    curr_agg = aggregate(curr_q)
+    prev_agg = aggregate(prev_q)
+
+    result_clusters = []
+    for c in clusters:
+        cur = curr_agg.get(c.id, {"clicks": 0, "impressions": 0, "keywords": 0})
+        prv = prev_agg.get(c.id, {"clicks": 0, "impressions": 0, "keywords": 0})
+        result_clusters.append({
+            **_cluster_out(c),
+            "clicks": cur["clicks"],
+            "impressions": cur["impressions"],
+            "keywords": cur["keywords"],
+            "clicks_change_pct": _pct(cur["clicks"], prv["clicks"]),
+            "impressions_change_pct": _pct(cur["impressions"], prv["impressions"]),
+        })
+    result_clusters.sort(key=lambda x: x["clicks"], reverse=True)
+
+    # Uncategorized
+    uncategorized_cur = curr_agg.get(None, {"clicks": 0, "impressions": 0, "keywords": 0})
+    uncategorized_queries = sorted(
+        [q for q in curr_q if classify(q["query"]) is None],
+        key=lambda x: x["clicks"], reverse=True,
+    )[:uncategorized_limit]
+
+    return {
+        "has_data": True,
+        "period": period,
+        "clusters": result_clusters,
+        "uncategorized": {
+            "clicks": uncategorized_cur["clicks"],
+            "impressions": uncategorized_cur["impressions"],
+            "keywords": uncategorized_cur["keywords"],
+            "queries": uncategorized_queries,
+        },
     }
