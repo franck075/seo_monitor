@@ -4,6 +4,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import { Sidebar } from "@/components/layout/Sidebar";
 import { TopNav } from "@/components/layout/TopNav";
+import { KeywordChanges } from "@/components/dashboard/KeywordChanges";
 import Link from "next/link";
 import {
   AreaChart, Area, BarChart, Bar, XAxis, YAxis, CartesianGrid,
@@ -482,6 +483,9 @@ export default function KeywordsPage({ params }: { params: { id: string } }) {
               </ResponsiveContainer>
             </div>
           )}
+
+          {/* Évolution des mots-clés (comparaison période) */}
+          <KeywordChanges siteId={id} />
 
           {/* Section tabs */}
           <div className="bg-white rounded-xl border border-gray-200">
