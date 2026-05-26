@@ -279,6 +279,35 @@ class GSCService:
             start_row += row_limit
         return results
 
+    def get_totals_by_date(self, start_date: str, end_date: str, row_limit: int = 25000) -> List[Dict[str, Any]]:
+        """Daily totals (clicks, impressions) over a period — for monthly aggregation."""
+        results = []
+        start_row = 0
+        while True:
+            body = {
+                "startDate": start_date,
+                "endDate": end_date,
+                "dimensions": ["date"],
+                "rowLimit": row_limit,
+                "startRow": start_row,
+                "dataState": "all",
+            }
+            response = self.service.searchanalytics().query(siteUrl=self.site_url, body=body).execute()
+            rows = response.get("rows", [])
+            if not rows:
+                break
+            for row in rows:
+                keys = row.get("keys", [])
+                results.append({
+                    "date": keys[0] if keys else "",
+                    "clicks": int(row.get("clicks", 0)),
+                    "impressions": int(row.get("impressions", 0)),
+                })
+            if len(rows) < row_limit:
+                break
+            start_row += row_limit
+        return results
+
     def get_site_performance(self, days: int = 1) -> Dict[str, Any]:
         end_date = datetime.now().strftime("%Y-%m-%d")
         start_date = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")

@@ -9,6 +9,7 @@ import {
   BarChart2, Zap, Shield, Map, FileText, Lightbulb, ExternalLink,
 } from "lucide-react";
 import Link from "next/link";
+import { AnalyticsOverview } from "@/components/dashboard/AnalyticsOverview";
 
 // ── Health ring ───────────────────────────────────────────────────────────────
 
@@ -277,6 +278,11 @@ export default function DashboardPage() {
               </div>
             ))}
           </div>
+
+          {/* ── Analytics GSC (par site) ── */}
+          {!isLoading && websites?.length > 0 && (
+            <AnalyticsOverview sites={websites} />
+          )}
 
           {/* ── Sites grid ── */}
           <div>
