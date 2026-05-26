@@ -266,3 +266,110 @@ async def analytics_breakdown(
         "devices": devices,
         "device_evolution": device_evolution,
     }
+
+
+def _default_brand_terms(site: Website) -> List[str]:
+    """Derive likely brand terms from the domain label and display name."""
+    terms = set()
+    if site.domain:
+        # pixlstudio.africa -> "pixlstudio"
+        label = site.domain.split("//")[-1].split("/")[0]
+        label = label[4:] if label.startswith("www.") else label
+        root = label.split(".")[0]
+        if root:
+            terms.add(root.lower())
+    if site.display_name:
+        terms.add(site.display_name.strip().lower())
+    return [t for t in terms if len(t) >= 3]
+
+
+def _is_branded(query: str, brand_terms: List[str]) -> bool:
+    q = query.lower()
+    return any(bt in q for bt in brand_terms)
+
+
+def _iso_week(d: date) -> str:
+    iso = d.isocalendar()
+    return f"{iso[0]}-S{iso[1]:02d}"
+
+
+@router.get("/branded")
+async def analytics_branded(
+    website_id: int,
+    period: int = Query(180, ge=7, le=365),
+    brand_terms: Optional[str] = Query(None, description="Comma-separated brand terms; overrides auto-detection"),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    effective_owner_id: int = Depends(get_workspace_owner_id),
+):
+    """Branded vs non-branded split (totals + weekly evolution)."""
+    site = await _verify_site(website_id, db, effective_owner_id)
+    gsc = await _gsc_for_site(site, db)
+    if not gsc:
+        return {"has_data": False, "reason": "GSC non configuré pour ce site"}
+
+    if brand_terms:
+        terms = [t.strip().lower() for t in brand_terms.split(",") if t.strip()]
+    else:
+        terms = _default_brand_terms(site)
+    if not terms:
+        return {"has_data": False, "reason": "Impossible de déterminer un terme de marque pour ce site."}
+
+    curr_end = date.today()
+    curr_start = curr_end - timedelta(days=period - 1)
+
+    try:
+        queries = gsc.get_top_queries_for_period(str(curr_start), str(curr_end))
+        daily = gsc.get_keyword_positions_daily(str(curr_start), str(curr_end))
+    except Exception as e:
+        return {"has_data": False, "reason": str(e)}
+
+    # ── Totals split ──
+    def empty(): return {"clicks": 0, "impressions": 0, "queries": 0}
+    branded, non_branded = empty(), empty()
+    for q in queries:
+        bucket = branded if _is_branded(q["query"], terms) else non_branded
+        bucket["clicks"] += q["clicks"]
+        bucket["impressions"] += q["impressions"]
+        bucket["queries"] += 1
+
+    def finalize(b):
+        return {
+            "clicks": b["clicks"],
+            "impressions": b["impressions"],
+            "queries": b["queries"],
+            "ctr": round(b["clicks"] / b["impressions"] * 100, 2) if b["impressions"] else 0,
+        }
+
+    total_clicks = branded["clicks"] + non_branded["clicks"]
+    branded_pct = round(branded["clicks"] / total_clicks * 100, 1) if total_clicks else 0
+
+    # ── Weekly evolution ──
+    week_map: Dict[str, Dict[str, int]] = {}
+    for r in daily:
+        try:
+            y, m, dd = (int(x) for x in r["date"].split("-"))
+            wk = _iso_week(date(y, m, dd))
+        except Exception:
+            continue
+        bucket = week_map.setdefault(wk, {"branded": 0, "non_branded": 0})
+        if _is_branded(r["query"], terms):
+            bucket["branded"] += r["clicks"]
+        else:
+            bucket["non_branded"] += r["clicks"]
+    evolution = [
+        {"week": wk, "branded": week_map[wk]["branded"], "non_branded": week_map[wk]["non_branded"]}
+        for wk in sorted(week_map.keys())
+    ]
+
+    return {
+        "has_data": True,
+        "period": period,
+        "brand_terms": terms,
+        "total_clicks": total_clicks,
+        "branded_pct": branded_pct,
+        "non_branded_pct": round(100 - branded_pct, 1) if total_clicks else 0,
+        "branded": finalize(branded),
+        "non_branded": finalize(non_branded),
+        "evolution": evolution,
+    }
