@@ -80,16 +80,21 @@ class AlertService:
 
     async def _eval_keyword_position_drop(self, rule: AlertRule, website_id: int) -> Tuple[bool, Optional[float], Dict]:
         result = await self.db.execute(
-            select(KeywordPosition)
+            select(KeywordPosition, Keyword.query)
+            .join(Keyword, Keyword.id == KeywordPosition.keyword_id)
             .where(KeywordPosition.website_id == website_id)
             .order_by(KeywordPosition.recorded_date.desc())
             .limit(200)
         )
-        rows = result.scalars().all()
+        rows = result.all()
         threshold = float(rule.threshold or 5)
-        for row in rows:
+        for row, query in rows:
             if row.position and row.position > threshold:
-                return True, float(row.position), {"keyword_id": row.keyword_id, "position": float(row.position)}
+                return True, float(row.position), {
+                    "keyword_id": row.keyword_id,
+                    "keyword": query,
+                    "position": float(row.position),
+                }
         return False, None, {}
 
     async def _eval_traffic_drop(self, rule: AlertRule, website_id: int) -> Tuple[bool, Optional[float], Dict]:
@@ -741,8 +746,10 @@ class AlertService:
                 pass
 
     async def _dispatch_notifications(self, rule: AlertRule, event: AlertEvent, context: Dict[str, Any]):
-        from app.services.email_service import send_alert_email, build_alert_email_html
+        from app.services.email_service import send_alert_email, build_alert_email_html, build_alert_subject
         from app.services.telegram_service import send_telegram_message, build_alert_telegram_message
+        from app.services.alert_i18n import dashboard_path_for
+        from app.config import settings
         from sqlalchemy import select
         from app.models.user import User
         from app.models.website import Website
@@ -755,81 +762,18 @@ class AlertService:
         site_result = await self.db.execute(select(Website).where(Website.id == event.website_id))
         site = site_result.scalar_one_or_none()
 
-        detail = str(context)
-        if rule.metric == "traffic_drop" and context:
-            detail = (
-                f"Sessions: {context.get('latest_sessions')} "
-                f"(moyenne 7j: {context.get('avg_7d_sessions')}) "
-                f"— Baisse de {context.get('drop_pct')}%"
-            )
-        elif rule.metric == "traffic_spike" and context:
-            detail = (
-                f"Sessions: {context.get('latest_sessions')} "
-                f"(moyenne 7j: {context.get('avg_7d_sessions')}) "
-                f"— Pic de +{context.get('spike_pct')}%"
-            )
-        elif rule.metric == "impressions_drop" and context:
-            detail = (
-                f"Impressions: {context.get('latest_impressions'):,} "
-                f"(moyenne 7j: {context.get('avg_7d_impressions'):,.0f}) "
-                f"— Baisse de {context.get('drop_pct')}%"
-            )
-        elif rule.metric == "clicks_drop" and context:
-            detail = (
-                f"Clics: {context.get('latest_clicks'):,} "
-                f"(moyenne 7j: {context.get('avg_7d_clicks'):,.0f}) "
-                f"— Baisse de {context.get('drop_pct')}%"
-            )
-        elif rule.metric == "ctr_drop" and context:
-            detail = (
-                f"CTR: {context.get('latest_ctr')}% "
-                f"(moyenne 7j: {context.get('avg_7d_ctr')}%) "
-                f"— Baisse de {context.get('drop_pts')} points"
-            )
-        elif rule.metric == "keyword_impressions_drop" and context:
-            kws = context.get("keywords", [])
-            kw_lines = "\n".join(
-                f"  • {k['query']}: {k['impressions_prev']} → {k['impressions_now']} ({k['drop_pct']}% de baisse)"
-                for k in kws
-            )
-            detail = (
-                f"{context.get('affected_count')} mot(s)-clé(s) en forte baisse d'impressions ({context.get('period')}):\n{kw_lines}"
-            )
-        elif rule.metric == "keyword_clicks_drop" and context:
-            kws = context.get("keywords", [])
-            kw_lines = "\n".join(
-                f"  • {k['query']}: {k['clicks_prev']} → {k['clicks_now']} clics ({k['drop_pct']}% de baisse)"
-                for k in kws
-            )
-            detail = (
-                f"{context.get('affected_count')} mot(s)-clé(s) en forte baisse de clics ({context.get('period')}):\n{kw_lines}"
-            )
-        elif rule.metric == "page_impressions_drop" and context:
-            pages = context.get("pages", [])
-            page_lines = "\n".join(
-                f"  • {p['page']}: {p['impressions_prev']} → {p['impressions_now']} impressions ({p['drop_pct']}% de baisse)"
-                for p in pages
-            )
-            detail = (
-                f"{context.get('affected_count')} page(s) en forte baisse d'impressions ({context.get('period')}):\n{page_lines}"
-            )
-        elif rule.metric == "zero_organic_pages_monthly" and context:
-            pages = context.get("pages", [])
-            page_lines = "\n".join(f"  • {p}" for p in pages[:20])
-            total = context.get("zero_organic_count", 0)
-            all_count = context.get("all_pages_count", 0)
-            detail = (
-                f"Bilan {context.get('month')} : {total} page(s) sur {all_count} sans aucune visite organique.\n"
-                f"Pages concernées :\n{page_lines}"
-                + ("\n  ..." if total > 20 else "")
-            )
+        site_domain = site.domain if site else str(event.website_id)
+        detected_at_fr = event.fired_at.strftime("%d/%m/%Y à %H:%M") if event.fired_at else ""
 
         ctx = {
-            "site": site.domain if site else str(event.website_id),
+            "site": site_domain,
             "metric": rule.metric,
-            "detail": detail,
-            "detected_at": str(event.fired_at),
-            "dashboard_url": f"http://localhost:3000/websites/{event.website_id}/traffic",
+            "raw_context": context or {},
+            "detected_at": detected_at_fr,
+            "dashboard_url": (
+                f"{settings.FRONTEND_URL.rstrip('/')}/sites/{event.website_id}"
+                f"{dashboard_path_for(rule.metric)}"
+            ),
         }
 
         recipient_email = getattr(user, "alert_email", None) or user.email
@@ -837,7 +781,8 @@ class AlertService:
         if "email" in rule.channels and recipient_email:
             try:
                 html = build_alert_email_html(ctx)
-                await send_alert_email(recipient_email, f"SEO Alert: {rule.metric}", html)
+                subject = build_alert_subject(rule.metric, site_domain, context or {})
+                await send_alert_email(recipient_email, subject, html)
             except Exception:
                 pass
 

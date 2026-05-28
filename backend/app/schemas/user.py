@@ -15,11 +15,11 @@ class UserLogin(BaseModel):
 class UserOut(BaseModel):
     id: int
     email: str
-    full_name: Optional[str]
-    role: str
+    full_name: Optional[str] = None
+    role: str = "user"
     plan: str = "starter"
-    is_active: bool
-    telegram_chat_id: Optional[str]
+    is_active: bool = True
+    telegram_chat_id: Optional[str] = None
     created_at: datetime
     model_config = {"from_attributes": True}
 

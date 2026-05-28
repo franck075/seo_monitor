@@ -6,6 +6,13 @@ import { api } from "@/lib/api";
 import Link from "next/link";
 import { BarChart2 } from "lucide-react";
 
+function safeRedirectTarget(from: string | null): string {
+  if (!from) return "/tableau-de-bord";
+  // Only allow internal paths to avoid open-redirect
+  if (!from.startsWith("/") || from.startsWith("//")) return "/tableau-de-bord";
+  return from;
+}
+
 export default function LoginPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -21,7 +28,10 @@ export default function LoginPage() {
       const res = await api.post("/auth/login", { email, password });
       Cookies.set("access_token", res.data.access_token, { expires: 1 });
       Cookies.set("refresh_token", res.data.refresh_token, { expires: 30 });
-      router.push("/tableau-de-bord");
+      const from = typeof window !== "undefined"
+        ? new URLSearchParams(window.location.search).get("from")
+        : null;
+      router.push(safeRedirectTarget(from));
     } catch {
       setError("Email ou mot de passe incorrect");
     } finally {

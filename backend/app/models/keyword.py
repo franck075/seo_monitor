@@ -1,4 +1,5 @@
-from sqlalchemy import Column, Integer, String, DateTime, Date, Numeric, BigInteger, ForeignKey, func, UniqueConstraint
+from sqlalchemy import Column, Integer, String, Boolean, DateTime, Date, Numeric, BigInteger, ForeignKey, func, UniqueConstraint
+from sqlalchemy.dialects.postgresql import ARRAY
 from sqlalchemy.orm import relationship
 from app.db.base import Base
 
@@ -29,3 +30,15 @@ class KeywordPosition(Base):
     __table_args__ = (UniqueConstraint("keyword_id", "recorded_date"),)
 
     keyword = relationship("Keyword", back_populates="positions")
+
+
+class KeywordCluster(Base):
+    __tablename__ = "keyword_clusters"
+    id = Column(Integer, primary_key=True, index=True)
+    website_id = Column(Integer, ForeignKey("websites.id", ondelete="CASCADE"), nullable=False, index=True)
+    name = Column(String(255), nullable=False)
+    color = Column(String(20), nullable=False, default="#3b82f6")
+    terms = Column(ARRAY(String), nullable=False, default=list)
+    is_brand = Column(Boolean, nullable=False, default=False)
+    position = Column(Integer, nullable=False, default=0)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())

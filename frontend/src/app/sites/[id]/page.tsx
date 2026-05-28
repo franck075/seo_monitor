@@ -6,7 +6,23 @@ import { Sidebar } from "@/components/layout/Sidebar";
 import { TopNav } from "@/components/layout/TopNav";
 import { MetricCard } from "@/components/cards/MetricCard";
 import Link from "next/link";
-import { BarChart2, Globe, Shield, Activity, FileText, AlertTriangle, Map, RefreshCw, Check, Lightbulb, SearchCheck } from "lucide-react";
+import { BarChart2, Globe, Shield, Activity, FileText, AlertTriangle, Map, RefreshCw, Check, Lightbulb, SearchCheck, MousePointerClick, Eye, Percent, Hash, FileStack, Sparkles } from "lucide-react";
+
+type KeywordStats = {
+  total_keywords: number;
+  total_clicks: number;
+  total_impressions: number;
+  avg_ctr: number;
+  avg_position: number;
+  source?: string;
+};
+
+function fmtNumber(n: number | undefined | null): string {
+  if (n === null || n === undefined) return "—";
+  if (n >= 1_000_000) return (n / 1_000_000).toFixed(1) + "M";
+  if (n >= 1_000) return (n / 1_000).toFixed(1) + "k";
+  return new Intl.NumberFormat("fr-FR").format(n);
+}
 
 export default function WebsiteDetailPage({ params }: { params: { id: string } }) {
   const id = params.id;
@@ -15,6 +31,12 @@ export default function WebsiteDetailPage({ params }: { params: { id: string } }
   const { data: website, isLoading } = useQuery({
     queryKey: ["website", id],
     queryFn: async () => (await api.get(`/websites/${id}`)).data,
+  });
+
+  const { data: gscStats } = useQuery<KeywordStats>({
+    queryKey: ["keyword-live-stats", id],
+    queryFn: async () => (await api.get(`/websites/${id}/keywords/live-stats?period=28`)).data,
+    retry: false,
   });
 
   const scanMutation = useMutation({
@@ -26,8 +48,11 @@ export default function WebsiteDetailPage({ params }: { params: { id: string } }
   });
 
   const quickLinks = [
+    { href: `/sites/${id}/quick-wins`, label: "Quick Wins", icon: Sparkles },
+    { href: `/sites/${id}/top-pages`, label: "Top pages", icon: FileStack },
     { href: `/sites/${id}/mots-cles`, label: "Mots-clés", icon: BarChart2 },
     { href: `/sites/${id}/trafic`, label: "Trafic", icon: Activity },
+    { href: `/sites/${id}/comportement`, label: "Comportement", icon: Activity },
     { href: `/sites/${id}/performance`, label: "Core Web Vitals", icon: Globe },
     { href: `/sites/${id}/changements-seo`, label: "Changements SEO", icon: FileText },
     { href: `/sites/${id}/surveillance-http`, label: "Statuts HTTP", icon: Shield },
@@ -37,6 +62,8 @@ export default function WebsiteDetailPage({ params }: { params: { id: string } }
     { href: `/sites/${id}/securite`, label: "Sécurité SEO", icon: Shield },
     { href: `/sites/${id}/monitoring-avance`, label: "Monitoring SEO", icon: SearchCheck },
   ];
+
+  const hasGsc = !!gscStats && gscStats.total_keywords > 0;
 
   if (isLoading) {
     return (
@@ -64,6 +91,24 @@ export default function WebsiteDetailPage({ params }: { params: { id: string } }
               <MetricCard title="Domaine" value={website.domain} />
               <MetricCard title="Fuseau horaire" value={website.timezone} />
               <MetricCard title="Statut" value={website.is_active ? "Actif" : "Inactif"} />
+            </div>
+          )}
+
+          {hasGsc && gscStats && (
+            <div>
+              <div className="flex items-center justify-between mb-3">
+                <h2 className="text-sm font-medium text-gray-500">Performance Search Console — 28 derniers jours</h2>
+                <Link href={`/sites/${id}/top-pages`} className="text-xs text-blue-600 hover:underline">
+                  Voir les Top pages →
+                </Link>
+              </div>
+              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4">
+                <MetricCard title="Impressions" icon={Eye} value={fmtNumber(gscStats.total_impressions)} />
+                <MetricCard title="Clics" icon={MousePointerClick} value={fmtNumber(gscStats.total_clicks)} />
+                <MetricCard title="CTR" icon={Percent} value={`${gscStats.avg_ctr.toFixed(1)}%`} />
+                <MetricCard title="Position moyenne" icon={Hash} value={gscStats.avg_position.toFixed(1)} />
+                <MetricCard title="Mots-clés positionnés" icon={BarChart2} value={fmtNumber(gscStats.total_keywords)} />
+              </div>
             </div>
           )}
 

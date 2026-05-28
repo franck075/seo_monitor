@@ -134,6 +134,230 @@ class GSCService:
             start_row += row_limit
         return results
 
+    def get_top_pages_for_period(self, start_date: str, end_date: str, row_limit: int = 25000) -> List[Dict[str, Any]]:
+        """Aggregated GSC metrics per page URL — matches GSC Pages tab exactly."""
+        results = []
+        start_row = 0
+        while True:
+            body = {
+                "startDate": start_date,
+                "endDate": end_date,
+                "dimensions": ["page"],
+                "rowLimit": row_limit,
+                "startRow": start_row,
+                "dataState": "all",
+            }
+            response = self.service.searchanalytics().query(siteUrl=self.site_url, body=body).execute()
+            rows = response.get("rows", [])
+            if not rows:
+                break
+            for row in rows:
+                keys = row.get("keys", [])
+                results.append({
+                    "page": keys[0] if keys else "",
+                    "clicks": int(row.get("clicks", 0)),
+                    "impressions": int(row.get("impressions", 0)),
+                    "ctr": round(float(row.get("ctr", 0.0)) * 100, 2),
+                    "position": round(float(row.get("position", 0.0)), 1),
+                })
+            if len(rows) < row_limit:
+                break
+            start_row += row_limit
+        return results
+
+    def get_page_metrics(self, page_url: str, start_date: str, end_date: str) -> Dict[str, Any]:
+        """Totals for one page URL over a period."""
+        body = {
+            "startDate": start_date,
+            "endDate": end_date,
+            "dimensions": [],
+            "dimensionFilterGroups": [{
+                "filters": [{"dimension": "page", "operator": "equals", "expression": page_url}]
+            }],
+            "dataState": "all",
+        }
+        response = self.service.searchanalytics().query(siteUrl=self.site_url, body=body).execute()
+        rows = response.get("rows", [])
+        row = rows[0] if rows else {}
+        return {
+            "clicks": int(row.get("clicks", 0)),
+            "impressions": int(row.get("impressions", 0)),
+            "ctr": round(float(row.get("ctr", 0.0)) * 100, 2),
+            "position": round(float(row.get("position", 0.0)), 1),
+        }
+
+    def get_top_queries_for_page(self, page_url: str, start_date: str, end_date: str, row_limit: int = 100) -> List[Dict[str, Any]]:
+        """Top keywords driving traffic to a specific page URL."""
+        body = {
+            "startDate": start_date,
+            "endDate": end_date,
+            "dimensions": ["query"],
+            "dimensionFilterGroups": [{
+                "filters": [{"dimension": "page", "operator": "equals", "expression": page_url}]
+            }],
+            "rowLimit": row_limit,
+            "dataState": "all",
+        }
+        response = self.service.searchanalytics().query(siteUrl=self.site_url, body=body).execute()
+        rows = response.get("rows", [])
+        return [
+            {
+                "query": (r.get("keys") or [""])[0],
+                "clicks": int(r.get("clicks", 0)),
+                "impressions": int(r.get("impressions", 0)),
+                "ctr": round(float(r.get("ctr", 0.0)) * 100, 2),
+                "position": round(float(r.get("position", 0.0)), 1),
+            }
+            for r in rows
+        ]
+
+    def get_page_device_metrics(self, start_date: str, end_date: str, row_limit: int = 25000) -> List[Dict[str, Any]]:
+        """Per-page GSC metrics broken down by device (mobile/desktop/tablet)."""
+        results = []
+        start_row = 0
+        while True:
+            body = {
+                "startDate": start_date,
+                "endDate": end_date,
+                "dimensions": ["page", "device"],
+                "rowLimit": row_limit,
+                "startRow": start_row,
+                "dataState": "all",
+            }
+            response = self.service.searchanalytics().query(siteUrl=self.site_url, body=body).execute()
+            rows = response.get("rows", [])
+            if not rows:
+                break
+            for row in rows:
+                keys = row.get("keys", [])
+                results.append({
+                    "page": keys[0] if len(keys) > 0 else "",
+                    "device": (keys[1] if len(keys) > 1 else "").upper(),
+                    "clicks": int(row.get("clicks", 0)),
+                    "impressions": int(row.get("impressions", 0)),
+                    "ctr": round(float(row.get("ctr", 0.0)) * 100, 2),
+                    "position": round(float(row.get("position", 0.0)), 1),
+                })
+            if len(rows) < row_limit:
+                break
+            start_row += row_limit
+        return results
+
+    def get_query_page_pairs(self, start_date: str, end_date: str, row_limit: int = 25000) -> List[Dict[str, Any]]:
+        """Aggregated GSC metrics per (query, page) pair over a period.
+
+        Used to identify the top query driving traffic to each page.
+        Paginates through all results.
+        """
+        results = []
+        start_row = 0
+        while True:
+            body = {
+                "startDate": start_date,
+                "endDate": end_date,
+                "dimensions": ["page", "query"],
+                "rowLimit": row_limit,
+                "startRow": start_row,
+                "dataState": "all",
+            }
+            response = self.service.searchanalytics().query(siteUrl=self.site_url, body=body).execute()
+            rows = response.get("rows", [])
+            if not rows:
+                break
+            for row in rows:
+                keys = row.get("keys", [])
+                results.append({
+                    "page": keys[0] if len(keys) > 0 else "",
+                    "query": keys[1] if len(keys) > 1 else "",
+                    "clicks": int(row.get("clicks", 0)),
+                    "impressions": int(row.get("impressions", 0)),
+                    "ctr": round(float(row.get("ctr", 0.0)) * 100, 2),
+                    "position": round(float(row.get("position", 0.0)), 1),
+                })
+            if len(rows) < row_limit:
+                break
+            start_row += row_limit
+        return results
+
+    def get_totals_by_date(self, start_date: str, end_date: str, row_limit: int = 25000) -> List[Dict[str, Any]]:
+        """Daily totals (clicks, impressions) over a period — for monthly aggregation."""
+        results = []
+        start_row = 0
+        while True:
+            body = {
+                "startDate": start_date,
+                "endDate": end_date,
+                "dimensions": ["date"],
+                "rowLimit": row_limit,
+                "startRow": start_row,
+                "dataState": "all",
+            }
+            response = self.service.searchanalytics().query(siteUrl=self.site_url, body=body).execute()
+            rows = response.get("rows", [])
+            if not rows:
+                break
+            for row in rows:
+                keys = row.get("keys", [])
+                results.append({
+                    "date": keys[0] if keys else "",
+                    "clicks": int(row.get("clicks", 0)),
+                    "impressions": int(row.get("impressions", 0)),
+                })
+            if len(rows) < row_limit:
+                break
+            start_row += row_limit
+        return results
+
+    def get_totals_by_country(self, start_date: str, end_date: str, row_limit: int = 250) -> List[Dict[str, Any]]:
+        """Totals per country over a period (GSC country dimension, ISO-3 codes)."""
+        body = {
+            "startDate": start_date,
+            "endDate": end_date,
+            "dimensions": ["country"],
+            "rowLimit": row_limit,
+            "dataState": "all",
+        }
+        response = self.service.searchanalytics().query(siteUrl=self.site_url, body=body).execute()
+        rows = response.get("rows", [])
+        return [
+            {
+                "country": (r.get("keys") or [""])[0].upper(),
+                "clicks": int(r.get("clicks", 0)),
+                "impressions": int(r.get("impressions", 0)),
+            }
+            for r in rows
+        ]
+
+    def get_device_metrics_by_date(self, start_date: str, end_date: str, row_limit: int = 25000) -> List[Dict[str, Any]]:
+        """Daily totals broken down by device — for the device split + evolution."""
+        results = []
+        start_row = 0
+        while True:
+            body = {
+                "startDate": start_date,
+                "endDate": end_date,
+                "dimensions": ["date", "device"],
+                "rowLimit": row_limit,
+                "startRow": start_row,
+                "dataState": "all",
+            }
+            response = self.service.searchanalytics().query(siteUrl=self.site_url, body=body).execute()
+            rows = response.get("rows", [])
+            if not rows:
+                break
+            for row in rows:
+                keys = row.get("keys", [])
+                results.append({
+                    "date": keys[0] if len(keys) > 0 else "",
+                    "device": (keys[1] if len(keys) > 1 else "").upper(),
+                    "clicks": int(row.get("clicks", 0)),
+                    "impressions": int(row.get("impressions", 0)),
+                })
+            if len(rows) < row_limit:
+                break
+            start_row += row_limit
+        return results
+
     def get_site_performance(self, days: int = 1) -> Dict[str, Any]:
         end_date = datetime.now().strftime("%Y-%m-%d")
         start_date = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")

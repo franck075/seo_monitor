@@ -37,6 +37,138 @@ async def _verify_site(website_id: int, db: AsyncSession, owner_id: int) -> Webs
         raise HTTPException(status_code=404, detail="Website not found")
     return site
 
+@router.get("/changes")
+async def keyword_changes(
+    website_id: int,
+    period: int = Query(28, ge=7, le=365),
+    status: str = Query("all"),
+    limit: int = Query(100, ge=1, le=1000),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    effective_owner_id: int = Depends(get_workspace_owner_id),
+):
+    """Compare GSC queries period-over-period: new / lost / improved / declined / common."""
+    from app.models.user import UserAPICredential
+    from app.core.crypto import decrypt_credentials
+    from app.services.gsc_service import GSCService
+
+    site = await _verify_site(website_id, db, effective_owner_id)
+    if not site.gsc_cred_id or not site.gsc_property:
+        return {"has_data": False, "reason": "GSC non configuré pour ce site", "counts": {}, "items": []}
+
+    cred = (await db.execute(
+        select(UserAPICredential).where(UserAPICredential.id == site.gsc_cred_id)
+    )).scalar_one_or_none()
+    if not cred:
+        return {"has_data": False, "reason": "Credential GSC introuvable", "counts": {}, "items": []}
+
+    gsc = GSCService(credentials_json=decrypt_credentials(cred.credentials_enc), site_url=site.gsc_property)
+
+    today = date.today()
+    curr_start = (today - timedelta(days=period - 1)).strftime("%Y-%m-%d")
+    curr_end = today.strftime("%Y-%m-%d")
+    prev_end_d = today - timedelta(days=period)
+    prev_start = (prev_end_d - timedelta(days=period - 1)).strftime("%Y-%m-%d")
+    prev_end = prev_end_d.strftime("%Y-%m-%d")
+
+    try:
+        curr = gsc.get_top_queries_for_period(curr_start, curr_end)
+        prev = gsc.get_top_queries_for_period(prev_start, prev_end)
+    except Exception as e:
+        return {"has_data": False, "reason": str(e), "counts": {}, "items": []}
+
+    prev_by_q = {q["query"]: q for q in prev}
+    THRESHOLD = 0.2  # position points to count as improved/declined
+
+    items = []
+    counts = {"all": 0, "improved": 0, "declined": 0, "new": 0, "lost": 0, "common": 0}
+
+    for q in curr:
+        p = prev_by_q.get(q["query"])
+        if p is None:
+            st = "new"
+            prev_pos = None
+            pos_change = None
+            clicks_change = q["clicks"]
+        else:
+            st = "common"
+            prev_pos = p["position"]
+            pos_change = round(p["position"] - q["position"], 1)  # +ve = improved (moved up)
+            clicks_change = q["clicks"] - p["clicks"]
+            if q["position"] < p["position"] - THRESHOLD:
+                substatus = "improved"
+            elif q["position"] > p["position"] + THRESHOLD:
+                substatus = "declined"
+            else:
+                substatus = "common"
+        item = {
+            "query": q["query"],
+            "status": st,
+            "substatus": substatus if p is not None else "new",
+            "clicks": q["clicks"],
+            "impressions": q["impressions"],
+            "ctr": q["ctr"],
+            "position": q["position"],
+            "prev_position": prev_pos,
+            "position_change": pos_change,
+            "clicks_change": clicks_change,
+        }
+        items.append(item)
+        counts["all"] += 1
+        if st == "new":
+            counts["new"] += 1
+        else:
+            counts["common"] += 1
+            if item["substatus"] == "improved":
+                counts["improved"] += 1
+            elif item["substatus"] == "declined":
+                counts["declined"] += 1
+
+    # Lost queries (in prev, not in curr)
+    curr_qs = {q["query"] for q in curr}
+    for p in prev:
+        if p["query"] in curr_qs:
+            continue
+        items.append({
+            "query": p["query"],
+            "status": "lost",
+            "substatus": "lost",
+            "clicks": 0,
+            "impressions": 0,
+            "ctr": 0,
+            "position": None,
+            "prev_position": p["position"],
+            "position_change": None,
+            "clicks_change": -p["clicks"],
+        })
+        counts["all"] += 1
+        counts["lost"] += 1
+
+    # Filter by requested status
+    def matches(it):
+        if status == "all":
+            return True
+        if status in ("new", "lost", "common"):
+            return it["status"] == status
+        if status in ("improved", "declined"):
+            return it["substatus"] == status
+        return True
+
+    filtered = [it for it in items if matches(it)]
+    # Sort: lost by prev clicks lost (most negative first), others by clicks desc
+    if status == "lost":
+        filtered.sort(key=lambda x: x["clicks_change"])
+    else:
+        filtered.sort(key=lambda x: x["clicks"], reverse=True)
+
+    return {
+        "has_data": True,
+        "period": period,
+        "counts": counts,
+        "items": filtered[:limit],
+    }
+
+
 @router.get("/live-stats")
 async def keyword_live_stats(
     website_id: int,
